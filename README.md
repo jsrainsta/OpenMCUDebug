@@ -13,6 +13,8 @@ A lightweight debugging assistant for embedded MCU development.
 [![GUI](https://img.shields.io/badge/GUI-PyQt6-orange.svg)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
 
+来都来了，给个Star⭐吧~
+
 </div>
 
 ---
