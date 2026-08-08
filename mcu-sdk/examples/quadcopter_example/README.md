@@ -1,7 +1,8 @@
-# Quadcopter Stage 2 集成示例
+# Quadcopter Stage 2/3 集成示例
 
 本示例展示如何将 Quadcopter 项目（`STM32F401 + uC/OS-II`）的串口输出
-从自由格式 `snprintf` 升级为 Stage 2 标准协议。
+从自由格式 `snprintf` 升级为 Stage 2 标准协议，并在 Stage 3 中
+通过 `visual` 字段让 PC 端自动生成仪表盘。
 
 ## 集成步骤
 
@@ -40,22 +41,26 @@ $VAL id=4,val=512
 
 PC 端自动显示设备名称和 15 个通道，实时更新数值。
 
-## 通道清单
+## 通道清单（Stage 3 起带可视化类型）
 
-| ID | 名称 | 类型 | 单位 | 来源 |
-|----|------|------|------|------|
-| 0 | Throttle | u16 | us | PPM_Values[2] |
-| 1 | Roll | u16 | us | PPM_Values[0] |
-| 2 | Pitch | u16 | us | PPM_Values[1] |
-| 3 | Yaw | u16 | us | PPM_Values[3] |
-| 4 | Accel_X | i16 | raw | MPU6050 |
-| 5 | Accel_Y | i16 | raw | MPU6050 |
-| 6 | Accel_Z | i16 | raw | MPU6050 |
-| 7 | Gyro_X | i16 | raw | MPU6050 |
-| 8 | Gyro_Y | i16 | raw | MPU6050 |
-| 9 | Gyro_Z | i16 | raw | MPU6050 |
-| 10 | Mag_X | i16 | raw | HMC5883L |
-| 11 | Mag_Y | i16 | raw | HMC5883L |
-| 12 | Mag_Z | i16 | raw | HMC5883L |
-| 13 | Pressure | u32 | raw | MS5611 |
-| 14 | Temperature | u32 | raw | MS5611 |
+| ID | 名称 | 类型 | 单位 | 可视化 | 来源 |
+|----|------|------|------|--------|------|
+| 0 | Throttle | u16 | us | gauge 仪表盘 | PPM_Values[2] |
+| 1 | Roll | u16 | us | chart 实时曲线 | PPM_Values[0] |
+| 2 | Pitch | u16 | us | chart 实时曲线 | PPM_Values[1] |
+| 3 | Yaw | u16 | us | chart 实时曲线 | PPM_Values[3] |
+| 4 | Accel_X | i16 | raw | text | MPU6050 |
+| 5 | Accel_Y | i16 | raw | text | MPU6050 |
+| 6 | Accel_Z | i16 | raw | text | MPU6050 |
+| 7 | Gyro_X | i16 | raw | text | MPU6050 |
+| 8 | Gyro_Y | i16 | raw | text | MPU6050 |
+| 9 | Gyro_Z | i16 | raw | text | MPU6050 |
+| 10 | Mag_X | i16 | raw | text | HMC5883L |
+| 11 | Mag_Y | i16 | raw | text | HMC5883L |
+| 12 | Mag_Z | i16 | raw | text | HMC5883L |
+| 13 | Pressure | u32 | raw | text | MS5611 |
+| 14 | Temperature | u32 | raw | chart 实时曲线 | MS5611 |
+
+PC 端收到带 `visual` 的 `$CH` 行后自动生成仪表盘：
+Throttle 仪表、Roll/Pitch/Yaw 姿态曲线、Temperature 温度曲线，
+其余通道以文本卡片显示。

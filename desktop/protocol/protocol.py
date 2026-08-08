@@ -1,4 +1,4 @@
-"""Stage 2 协议解析器。
+"""Stage 2/3 协议解析器。
 
 解析 MCU 发来的 $DEV / $CH / $VAL 协议行，返回结构化的消息，
 供 DeviceManager / DataManager 消费。
@@ -7,8 +7,11 @@
 协议格式（单行紧凑 key=value）::
 
     $DEV name=Quadcopter,ver=1.0
-    $CH id=0,name=Throttle,type=u16,unit=us
+    $CH id=0,name=Throttle,type=u16,unit=us,visual=chart
     $VAL id=0,val=1000
+
+Stage 3 起 $CH 可选携带 visual 字段（text/gauge/chart，默认 text），
+解析器无需特殊处理——key=value 通配提取即可。其余字段向后兼容。
 """
 
 import re

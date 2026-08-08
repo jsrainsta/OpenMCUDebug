@@ -119,7 +119,7 @@ $VAL id=3,val=11.8
 
 ```
 $DEV name=Quadcopter,ver=1.0
-$CH id=0,name=Throttle,type=u16,unit=us
+$CH id=0,name=Throttle,type=u16,unit=us,visual=gauge
 $CH id=1,name=Accel_X,type=i16,unit=raw
 $CH id=2,name=Accel_Y,type=i16,unit=raw
 $CH id=3,name=Accel_Z,type=i16,unit=raw
@@ -136,3 +136,54 @@ $VAL id=2,val=-45
 - `$VAL` → 更新对应通道的当前值，实时显示在面板中
 - 所有 `$` 开头的协议行在日志窗口以紫色显示（区别于 Stage 1 的绿/蓝/红）
 - 非协议行完全按 Stage 1 规则显示（向下兼容）
+
+---
+
+## Stage 3：可视化描述（v0.3）
+
+### 设计原则
+
+- **数据与界面分离**：设备在协议中描述"怎么显示"，PC 端自动生成对应组件
+- **`visual` 是 `$CH` 的可选扩展**：不携带时行为与 Stage 2 完全一致（默认文本显示）
+- **向后兼容**：旧固件（无 visual 字段）在 v0.3 PC 端上表现与 v0.2 相同
+
+### CHANNEL_REGISTER 增加 visual 字段
+
+```
+$CH id=<编号>,name=<名称>,type=<类型>,unit=<单位>,visual=<可视化类型>
+```
+
+| visual | 含义 | PC 端生成组件 | 适合场景 |
+|--------|------|--------------|----------|
+| `text`（默认） | 普通数值 | 文本卡片（大字号数值 + 单位） | 开关状态、原始传感器值 |
+| `gauge` | 仪表盘 | 270° 圆弧仪表，量程随数据自适应 | 电压、电量、百分比、油门位置 |
+| `chart` | 实时曲线 | 滚动曲线（最近 300 个采样点，Y 轴自适应） | 温度、速度、姿态角 |
+
+示例：
+
+```
+$CH id=0,name=Throttle,type=u16,unit=us,visual=gauge
+$CH id=1,name=Roll,type=i16,unit=degree,visual=chart
+$CH id=2,name=Status,type=str,visual=text
+```
+
+规则：
+
+- `visual` 可省略，缺省为 `text`
+- 未知类型按 `text` 处理（容错）
+- 仪表/曲线忽略字符串值（如 `$VAL id=0,val=armed`）
+
+### PC 端自动生成流程
+
+```
+$CH id=0,name=Throttle,type=u16,unit=us,visual=gauge
+        ↓
+  通道注册（DeviceManager）
+        ↓
+  仪表盘按 visual 创建组件（Dashboard）
+        ↓
+$VAL id=0,val=1500  → 实时刷新对应组件
+```
+
+仪表盘位于主窗口"仪表盘"Tab，与"日志终端"Tab 并列；
+断开串口时自动清空，重连后按新的 `$CH` 重新生成。

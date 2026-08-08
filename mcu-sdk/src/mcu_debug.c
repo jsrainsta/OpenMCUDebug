@@ -39,14 +39,27 @@ void Debug_Device_Init(const char *name, const char *version)
 }
 
 void Debug_Register_Channel(uint8_t id, const char *name,
-                            const char *type, const char *unit)
+                            const char *type, const char *unit,
+                            const char *visual)
 {
     if (name == NULL || type == NULL) {
         return;
     }
+    /* visual 为 NULL / 空 / text 时省略该字段，保持与旧协议完全兼容 */
+    int has_visual = (visual != NULL) && (visual[0] != '\0')
+                     && (strcmp(visual, DBG_VISUAL_TEXT) != 0);
+
     if (unit && unit[0] != '\0') {
-        Debug_Printf("$CH id=%u,name=%s,type=%s,unit=%s",
-                     id, name, type, unit);
+        if (has_visual) {
+            Debug_Printf("$CH id=%u,name=%s,type=%s,unit=%s,visual=%s",
+                         id, name, type, unit, visual);
+        } else {
+            Debug_Printf("$CH id=%u,name=%s,type=%s,unit=%s",
+                         id, name, type, unit);
+        }
+    } else if (has_visual) {
+        Debug_Printf("$CH id=%u,name=%s,type=%s,visual=%s",
+                     id, name, type, visual);
     } else {
         Debug_Printf("$CH id=%u,name=%s,type=%s", id, name, type);
     }

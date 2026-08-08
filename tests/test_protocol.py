@@ -41,6 +41,18 @@ def test_ch_no_unit():
     print("PASS: CHANNEL_REGISTER 无单位")
 
 
+def test_ch_with_visual():
+    """Stage 3：$CH 携带可视化类型。"""
+    kind, data = parse_line("$CH id=0,name=Throttle,type=u16,unit=us,visual=gauge")
+    assert kind == "CH"
+    assert data["visual"] == "gauge"
+    kind, data = parse_line("$CH id=1,name=Roll,type=i16,unit=degree,visual=chart")
+    assert data["visual"] == "chart"
+    kind, data = parse_line("$CH id=2,name=Status,type=str,visual=text")
+    assert data["visual"] == "text"
+    print("PASS: CHANNEL_REGISTER 带可视化类型")
+
+
 def test_val():
     kind, data = parse_line("$VAL id=0,val=1000")
     assert kind == "VAL", kind
@@ -98,6 +110,7 @@ if __name__ == "__main__":
     test_dev_no_version()
     test_ch()
     test_ch_no_unit()
+    test_ch_with_visual()
     test_val()
     test_val_negative()
     test_val_float()

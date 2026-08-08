@@ -1,6 +1,6 @@
 """主窗口界面。
 
-Stage 2：串口连接 + 日志终端 + 命令发送 + 设备信息面板 + 通道数据面板。
+Stage 3：串口连接 + 日志终端 + 命令发送 + 设备信息面板 + 通道数据面板 + 自动仪表盘。
 """
 
 from html import escape
@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSplitter,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -27,6 +28,7 @@ from desktop.device.device_manager import DeviceManager
 from desktop.parser.log_parser import color_for, parse_line
 from desktop.protocol.protocol import parse_line as parse_protocol
 from desktop.serial.serial_manager import SerialManager
+from desktop.visualization.dashboard import DashboardWidget
 
 # 常用波特率
 BAUD_RATES = ["9600", "19200", "38400", "57600", "115200",
@@ -93,12 +95,18 @@ class MainWindow(QMainWindow):
             " font-family: Consolas, 'Courier New'; font-size: 13px; }"
         )
 
+        # Stage 3：自动仪表盘（日志终端 / 仪表盘 两个 Tab）
+        self._dashboard = DashboardWidget()
+        self._tab_widget = QTabWidget()
+        self._tab_widget.addTab(self._log_view, "日志终端")
+        self._tab_widget.addTab(self._dashboard, "仪表盘")
+
         layout.addLayout(self._build_toolbar())
 
-        # -- 左右分栏：设备面板 | 日志 --
+        # -- 左右分栏：设备面板 | 日志/仪表盘 --
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._device_panel)
-        splitter.addWidget(self._log_view)
+        splitter.addWidget(self._tab_widget)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
         splitter.setSizes([250, 850])
@@ -284,6 +292,8 @@ class MainWindow(QMainWindow):
         item = QTreeWidgetItem([label, "—"])
         item.setData(0, Qt.ItemDataRole.UserRole, channel.id)
         self._channel_tree.addTopLevelItem(item)
+        # Stage 3：仪表盘按 visual 字段自动生成组件
+        self._dashboard.add_channel(channel)
 
     def _on_value_updated(self, ch_id, raw_val, parsed_val):
         display = raw_val
@@ -298,11 +308,15 @@ class MainWindow(QMainWindow):
             if item.data(0, Qt.ItemDataRole.UserRole) == ch_id:
                 item.setText(1, display)
                 break
+        # Stage 3：刷新仪表盘对应组件
+        self._dashboard.update_value(ch_id, parsed_val)
 
     def _on_device_reset(self):
         self._device_panel.setVisible(False)
         self._device_label.setText("")
         self._channel_tree.clear()
+        # Stage 3：清空仪表盘
+        self._dashboard.reset()
 
     # ====== 命令发送 ======
 

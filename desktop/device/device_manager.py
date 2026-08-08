@@ -69,11 +69,16 @@ class DeviceManager(QObject):
             return
         if ch_id < 0:
             return
+        # Stage 3：可视化类型，未知值回退为 text
+        visual = data.get("visual", "text")
+        if visual not in ("text", "gauge", "chart"):
+            visual = "text"
         ch = Channel(
             id=ch_id,
             name=data.get("name", "?"),
             type=data.get("type", "i32"),
             unit=data.get("unit", ""),
+            visual=visual,
         )
         if self.device:
             self.device.add_channel(ch)

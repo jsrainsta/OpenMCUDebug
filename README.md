@@ -28,6 +28,8 @@ A lightweight debugging assistant for embedded MCU development.
 - **串口连接**：自动检测 / 选择串口，波特率可设置（默认 115200），一键打开关闭
 - **日志终端**：实时显示、自动滚动、一键清空，按 `[INFO]` / `[DATA]` / `[ERROR]` 分级着色
 - **命令控制**：输入 `led on` 等文本命令直接下发，行尾可选（CRLF / LF / 无）
+- **设备识别**：设备自动宣告身份（名称 / 版本），通道注册后实时显示数值
+- **自动仪表盘**：设备只需在协议中描述显示方式（文本 / 仪表盘 / 实时曲线），PC 自动生成
 - **MCU 端 SDK**：`Debug_Init()` / `Debug_Print()` / `Debug_Printf()`，附 STM32 完整示例
 - **简单文本协议**：无需 JSON / 二进制协议，串口助手即可排查问题
 
@@ -63,13 +65,29 @@ Debug_Data("Temperature=%d", 25);
 Debug_Error("Sensor Failed");
 ```
 
-4. 命令接收（单字节中断 + 行缓冲）参考 `mcu-sdk/examples/stm32_example/main.c`
+4. 注册数据通道并描述显示方式（PC 端自动生成仪表盘）：
+
+```c
+Debug_Device_Init("Quadcopter", "1.0");
+Debug_Register_Channel(0, "Throttle", "u16", "us", DBG_VISUAL_GAUGE);
+Debug_Register_Channel(1, "Roll",     "u16", "us", DBG_VISUAL_CHART);
+Debug_Register_Channel(4, "Accel_X",  "i16", "raw", NULL);  // 文本显示
+
+// 周期上报
+Debug_Send_Val(0, throttle);
+Debug_Send_Val_Float(3, 15.2f);
+```
+
+5. 命令接收（单字节中断 + 行缓冲）参考 `mcu-sdk/examples/stm32_example/main.c`
 
 ## 📡 通信协议
 
 | 方向 | 格式 | 示例 |
 |------|------|------|
 | MCU → PC | `[TAG] 内容`（UTF-8，一行一条） | `[INFO] System Start` / `[DATA] Counter=10` |
+| MCU → PC | `$DEV` 设备宣告 | `$DEV name=Quadcopter,ver=1.0` |
+| MCU → PC | `$CH` 通道注册（可选 `visual`） | `$CH id=0,name=Throttle,type=u16,unit=us,visual=gauge` |
+| MCU → PC | `$VAL` 数据更新 | `$VAL id=0,val=1500` |
 | PC → MCU | 纯文本命令，一行一条 | `led on` / `motor 1000` / `pid kp 1.5` |
 
 详细说明见 [docs/protocol.md](docs/protocol.md)。
@@ -81,11 +99,14 @@ desktop/            PC 端软件（Python + PyQt6 + pyserial）
   ├── main.py           入口
   ├── serial/           串口通信模块
   ├── parser/           日志解析模块
+  ├── protocol/         设备协议解析（$DEV / $CH / $VAL）
+  ├── device/           设备模型与设备管理器
+  ├── visualization/    Dashboard 组件（文本 / 仪表盘 / 曲线）
   └── ui/               PyQt6 界面
 mcu-sdk/            MCU 端 SDK（C）
   ├── include/          mcu_debug.h
   ├── src/              mcu_debug.c
-  └── examples/         STM32 示例
+  └── examples/         STM32 / Quadcopter 示例
 docs/               协议文档、截图
 tests/              无硬件测试（pyserial loop:// 虚拟串口）
 ```
@@ -97,17 +118,21 @@ tests/              无硬件测试（pyserial loop:// 虚拟串口）
 ```bash
 python -m tests.test_serial_manager   # 串口收发
 python -m tests.test_parser           # 日志解析
-python -m tests.test_gui_smoke        # 界面冒烟
+python -m tests.test_protocol         # 设备协议解析
+python -m tests.test_device_manager   # 设备模型管理
+python -m tests.test_dashboard        # 仪表盘组件
+python -m tests.test_gui_smoke        # 界面冒烟（含仪表盘）
 ```
 
 ## 🗺️ 路线图
 
 | 版本 | 规划内容 |
 |------|----------|
-| v0.1（当前） | 串口通信、日志查看、命令控制（Stage 1 MVP） |
-| v0.2 | 标准化数据格式、数据解析 |
-| v0.3 | 实时曲线、数据保存 |
-| v0.5 | 配置文件、自动生成界面 |
+| v0.1 ✅ | 串口通信、日志查看、命令控制（Stage 1 MVP） |
+| v0.2 ✅ | 标准化数据格式、设备模型（$DEV / $CH / $VAL） |
+| v0.3 ✅ | 自动仪表盘（文本 / 仪表盘 / 实时曲线） |
+| v0.4 | 数据保存与回放 |
+| v0.5 | 配置文件、参数调节 |
 | v1.0 | MCU SDK 完善、多设备支持、插件系统 |
 
 ## 📄 许可证

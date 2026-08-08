@@ -66,6 +66,24 @@ def test_value_float():
     print("PASS: 通道值更新（float）")
 
 
+def test_channel_visual():
+    """Stage 3：visual 字段透传 + 非法值回退。"""
+    dm = DeviceManager()
+    dm.process_message("DEV", {"name": "Quadcopter"})
+    dm.process_message("CH", {"id": "0", "name": "Throttle", "type": "u16", "unit": "us",
+                              "visual": "gauge"})
+    dm.process_message("CH", {"id": "1", "name": "Roll", "type": "i16", "unit": "degree",
+                              "visual": "chart"})
+    dm.process_message("CH", {"id": "2", "name": "Pressure", "type": "u32"})  # 无 visual
+    dm.process_message("CH", {"id": "3", "name": "X", "type": "i16",
+                              "visual": "hologram"})  # 未知类型
+    assert dm.device.get_channel(0).visual == "gauge"
+    assert dm.device.get_channel(1).visual == "chart"
+    assert dm.device.get_channel(2).visual == "text", "缺省应为 text"
+    assert dm.device.get_channel(3).visual == "text", "未知类型应回退 text"
+    print("PASS: 通道可视化类型解析")
+
+
 def test_reset():
     dm = DeviceManager()
     dm.process_message("DEV", {"name": "Quadcopter"})
@@ -91,5 +109,6 @@ if __name__ == "__main__":
     test_channels_before_device()
     test_value_update()
     test_value_float()
+    test_channel_visual()
     test_reset()
     test_invalid_messages()

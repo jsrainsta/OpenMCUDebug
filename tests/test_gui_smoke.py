@@ -1,7 +1,8 @@
 """GUI 冒烟测试（离屏运行，不显示窗口）。
 
-覆盖 Stage 1 + Stage 2 完整链路：
-打开串口 → MCU 发送协议行 → 设备面板出现设备名 + 通道 → 数值更新。
+覆盖 Stage 1 + Stage 2 + Stage 3 完整链路：
+打开串口 → MCU 发送协议行 → 设备面板出现设备名 + 通道 → 数值更新
+→ 仪表盘按 visual 自动生成组件并刷新。
 
 运行方式（在项目根目录）::
 
@@ -91,10 +92,45 @@ def test_window_loopback():
     assert window._device_manager.device is None
     assert not window._device_panel.isVisible()
     assert window._channel_tree.topLevelItemCount() == 0
+    assert window._dashboard.count() == 0, "reset 后仪表盘应清空"
+
+    # --- Stage 3：带 visual 的通道注册 → 自动生成仪表盘 ---
+    window._manager.send("$DEV name=Quadcopter,ver=1.0\n")
+    window._manager.send("$CH id=0,name=Throttle,type=u16,unit=us,visual=gauge\n")
+    window._manager.send("$CH id=1,name=Roll,type=i16,unit=degree,visual=chart\n")
+    window._manager.send("$CH id=2,name=Status,type=str\n")
+    app.processEvents()
+    time.sleep(0.1)
+    app.processEvents()
+
+    assert window._dashboard.count() == 3
+    from desktop.visualization.widgets.chart_widget import ChartWidget
+    from desktop.visualization.widgets.gauge_widget import GaugeWidget
+    from desktop.visualization.widgets.text_widget import TextWidget
+    assert isinstance(window._dashboard._widgets[0], GaugeWidget)
+    assert isinstance(window._dashboard._widgets[1], ChartWidget)
+    assert isinstance(window._dashboard._widgets[2], TextWidget)
+    assert window._tab_widget.count() == 2, "应包含 日志终端 / 仪表盘 两个 Tab"
+
+    # 仪表盘随 $VAL 实时刷新
+    window._manager.send("$VAL id=0,val=1500\n")
+    window._manager.send("$VAL id=1,val=-512\n")
+    app.processEvents()
+    time.sleep(0.1)
+    app.processEvents()
+
+    assert window._dashboard._widgets[0]._value == 1500
+    assert len(window._dashboard._widgets[1]._points) == 1
+    assert window._dashboard._widgets[1]._points[0][1] == -512.0
+
+    # 切换仪表盘 Tab 可见
+    window._tab_widget.setCurrentIndex(1)
+    assert window._tab_widget.currentIndex() == 1
+    app.processEvents()
 
     window._manager.close()
     window.close()
-    print("PASS: Stage 1 + Stage 2 GUI 冒烟测试通过")
+    print("PASS: Stage 1 + Stage 2 + Stage 3 GUI 冒烟测试通过")
 
 
 if __name__ == "__main__":

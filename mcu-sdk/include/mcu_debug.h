@@ -10,6 +10,11 @@
  *
  * Stage 2（设备模型）:
  *   MCU -> PC: $DEV name=...,ver=...  /  $CH id=...,name=...,type=...,unit=...  /  $VAL id=...,val=...
+ *
+ * Stage 3（可视化）:
+ *   $CH 可选携带 visual 字段，PC 端据此自动生成仪表盘:
+ *   $CH id=0,name=Throttle,type=u16,unit=us,visual=gauge
+ *   $CH id=1,name=Roll,type=u16,unit=us,visual=chart
  */
 #ifndef MCU_DEBUG_H
 #define MCU_DEBUG_H
@@ -36,6 +41,14 @@ void Debug_Printf(const char *fmt, ...);
 #define Debug_Data(...)    Debug_Printf("[DATA] " __VA_ARGS__)
 #define Debug_Error(...)   Debug_Printf("[ERROR] " __VA_ARGS__)
 
+/* ======================== Stage 3：可视化类型 ======================== */
+
+/** 通道可视化类型（Debug_Register_Channel 的 visual 参数，可为 NULL）。
+ *  PC 端据此自动生成仪表盘组件，未知类型回退为文本显示。 */
+#define DBG_VISUAL_TEXT   "text"    /* 普通数值显示（默认） */
+#define DBG_VISUAL_GAUGE  "gauge"   /* 仪表盘：电压 / 电量 / 百分比 */
+#define DBG_VISUAL_CHART  "chart"   /* 实时曲线：温度 / 速度 / 姿态 */
+
 /* ======================== Stage 2：设备模型 ======================== */
 
 /**
@@ -53,19 +66,23 @@ void Debug_Device_Init(const char *name, const char *version);
 
 /**
  * @brief 注册一个数据通道。
- * @param id   通道编号（0~255）
- * @param name 通道名称（如 "Roll"、"Battery"）
- * @param type 数据类型（"i8"/"i16"/"i32"/"u8"/"u16"/"u32"/"f32"/"str"）
- * @param unit 单位（如 "degree"、"volt"、"us"、"raw"，可为 NULL）
+ * @param id     通道编号（0~255）
+ * @param name   通道名称（如 "Roll"、"Battery"）
+ * @param type   数据类型（"i8"/"i16"/"i32"/"u8"/"u16"/"u32"/"f32"/"str"）
+ * @param unit   单位（如 "degree"、"volt"、"us"、"raw"，可为 NULL）
+ * @param visual 可视化类型（DBG_VISUAL_TEXT / _GAUGE / _CHART，可为 NULL）
  *
  * 使用示例:
- *   Debug_Register_Channel(0, "Throttle", "u16", "us");
+ *   Debug_Register_Channel(0, "Throttle", "u16", "us", DBG_VISUAL_GAUGE);
+ *   Debug_Register_Channel(1, "Roll",     "u16", "us", DBG_VISUAL_CHART);
  *
- * 发送协议行:
- *   $CH id=0,name=Throttle,type=u16,unit=us
+ * 发送协议行（visual 为 text 或 NULL 时省略该字段，保持兼容）:
+ *   $CH id=0,name=Throttle,type=u16,unit=us,visual=gauge
+ *   $CH id=1,name=Roll,type=u16,unit=us,visual=chart
  */
 void Debug_Register_Channel(uint8_t id, const char *name,
-                            const char *type, const char *unit);
+                            const char *type, const char *unit,
+                            const char *visual);
 
 /**
  * @brief 发送一个整数通道值。

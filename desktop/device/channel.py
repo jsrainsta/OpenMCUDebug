@@ -13,4 +13,5 @@ class Channel:
     name: str
     type: str          # "i16" / "u32" / "f32" / "str" 等
     unit: str
+    visual: str = "text"  # 可视化方式: "text" / "gauge" / "chart"（Stage 3）
     value: Any = None  # 最新接收到的值
