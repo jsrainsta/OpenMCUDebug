@@ -1,0 +1,61 @@
+# Quadcopter Stage 2 集成示例
+
+本示例展示如何将 Quadcopter 项目（`STM32F401 + uC/OS-II`）的串口输出
+从自由格式 `snprintf` 升级为 Stage 2 标准协议。
+
+## 集成步骤
+
+1. 将 `mcu-sdk/include` 和 `mcu-sdk/src` 复制到 Quadcopter 工程并加入编译
+2. 在工程中实现 `Debug_UART_Send()`（即已有的 `HAL_UART_Transmit` 调用）
+3. 用本示例的 `UartTask` 替换原 `Core/Src/main.c` 中的同名函数
+4. 重新编译 → 烧录 → PC 端打开串口即可看到设备信息面板
+
+## 效果对比
+
+### 原输出（自由格式，Stage 1）
+
+```
+THR:1000
+Accel:0,0,16384
+Gyro:0,0,0
+Mag:0,0,0
+Pre_RAW:0 Tem_RAW:0
+```
+
+PC 只能显示，无法自动理解数据含义。
+
+### 新输出（Stage 2 协议）
+
+```
+$DEV name=Quadcopter,ver=1.0
+$CH id=0,name=Throttle,type=u16,unit=us
+$CH id=1,name=Roll,type=u16,unit=us
+...
+$CH id=14,name=Temperature,type=u32,unit=raw
+$VAL id=0,val=1000
+$VAL id=1,val=1500
+$VAL id=4,val=512
+...
+```
+
+PC 端自动显示设备名称和 15 个通道，实时更新数值。
+
+## 通道清单
+
+| ID | 名称 | 类型 | 单位 | 来源 |
+|----|------|------|------|------|
+| 0 | Throttle | u16 | us | PPM_Values[2] |
+| 1 | Roll | u16 | us | PPM_Values[0] |
+| 2 | Pitch | u16 | us | PPM_Values[1] |
+| 3 | Yaw | u16 | us | PPM_Values[3] |
+| 4 | Accel_X | i16 | raw | MPU6050 |
+| 5 | Accel_Y | i16 | raw | MPU6050 |
+| 6 | Accel_Z | i16 | raw | MPU6050 |
+| 7 | Gyro_X | i16 | raw | MPU6050 |
+| 8 | Gyro_Y | i16 | raw | MPU6050 |
+| 9 | Gyro_Z | i16 | raw | MPU6050 |
+| 10 | Mag_X | i16 | raw | HMC5883L |
+| 11 | Mag_Y | i16 | raw | HMC5883L |
+| 12 | Mag_Z | i16 | raw | HMC5883L |
+| 13 | Pressure | u32 | raw | MS5611 |
+| 14 | Temperature | u32 | raw | MS5611 |

@@ -24,6 +24,53 @@ void Debug_Init(void)
     /* 预留：需要时可在此初始化 DMA 发送等 */
 }
 
+/* ======================== Stage 2 实现 ======================== */
+
+void Debug_Device_Init(const char *name, const char *version)
+{
+    if (name == NULL) {
+        return;
+    }
+    if (version && version[0] != '\0') {
+        Debug_Printf("$DEV name=%s,ver=%s", name, version);
+    } else {
+        Debug_Printf("$DEV name=%s,ver=0", name);
+    }
+}
+
+void Debug_Register_Channel(uint8_t id, const char *name,
+                            const char *type, const char *unit)
+{
+    if (name == NULL || type == NULL) {
+        return;
+    }
+    if (unit && unit[0] != '\0') {
+        Debug_Printf("$CH id=%u,name=%s,type=%s,unit=%s",
+                     id, name, type, unit);
+    } else {
+        Debug_Printf("$CH id=%u,name=%s,type=%s", id, name, type);
+    }
+}
+
+void Debug_Send_Val(uint8_t id, int32_t value)
+{
+    Debug_Printf("$VAL id=%u,val=%ld", id, (long)value);
+}
+
+void Debug_Send_Val_Float(uint8_t id, float value)
+{
+    /* 缓冲区足够容纳 $VAL id=255,val=-1.234567e+38\r\n 等极端格式 */
+    Debug_Printf("$VAL id=%u,val=%.6g", id, (double)value);
+}
+
+void Debug_Send_Val_Str(uint8_t id, const char *value)
+{
+    if (value == NULL) {
+        return;
+    }
+    Debug_Printf("$VAL id=%u,val=%s", id, value);
+}
+
 void Debug_Print(const char *msg)
 {
     if (msg == NULL) {

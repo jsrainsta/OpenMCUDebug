@@ -1,45 +1,49 @@
 """主窗口界面。
 
-包含串口选择、波特率设置、打开/关闭、日志终端和命令发送。
+Stage 2：串口连接 + 日志终端 + 命令发送 + 设备信息面板 + 通道数据面板。
 """
 
 from html import escape
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from desktop.device.device_manager import DeviceManager
 from desktop.parser.log_parser import color_for, parse_line
+from desktop.protocol.protocol import parse_line as parse_protocol
 from desktop.serial.serial_manager import SerialManager
 
 # 常用波特率
 BAUD_RATES = ["9600", "19200", "38400", "57600", "115200",
               "230400", "460800", "921600"]
 
-# 行尾选项: 界面显示文本 -> 实际追加内容
 LINE_ENDINGS = {
     "\\r\\n (CRLF)": "\r\n",
     "\\n (LF)": "\n",
     "无": "",
 }
 
-SYSTEM_COLOR = "#808080"  # 系统提示（连接状态等）
-SEND_COLOR = "#5ac8fa"    # 发送命令回显
+SYSTEM_COLOR = "#808080"
+SEND_COLOR = "#5ac8fa"
+PROTOCOL_LEVEL = "$PROTOCOL"
 
 
 class _SerialBridge(QObject):
-    """把后台接收线程的调用桥接为 Qt 信号（线程安全）。"""
-
     data_received = pyqtSignal(str)
     error = pyqtSignal(str)
 
@@ -48,8 +52,16 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MCU Debug Assistant")
-        self.resize(900, 600)
+        self.resize(1100, 650)
 
+        # ---- 模型层 ----
+        self._device_manager = DeviceManager()
+        self._device_manager.device_updated.connect(self._on_device_updated)
+        self._device_manager.channel_added.connect(self._on_channel_added)
+        self._device_manager.value_updated.connect(self._on_value_updated)
+        self._device_manager.device_reset.connect(self._on_device_reset)
+
+        # ---- 串口桥接 ----
         self._bridge = _SerialBridge()
         self._manager = SerialManager(
             on_data=self._bridge.data_received.emit,
@@ -62,29 +74,72 @@ class MainWindow(QMainWindow):
         self.refresh_ports()
         self._update_connection_state()
 
-    # ---------- 界面构建 ----------
+    # ====== 界面构建 ======
 
     def _build_ui(self):
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        # 先创建日志控件，工具栏里的“清空日志”按钮要引用它
+        # 先创建设备面板和日志控件（工具栏"清空日志"按钮需要引用 _log_view）
+        self._device_panel = self._build_device_panel()
+        self._device_panel.setVisible(False)
+
         self._log_view = QPlainTextEdit()
         self._log_view.setReadOnly(True)
-        self._log_view.setMaximumBlockCount(5000)  # 防止长时间运行内存膨胀
+        self._log_view.setMaximumBlockCount(5000)
         self._log_view.setStyleSheet(
             "QPlainTextEdit { background-color: #1e1f22; color: #c8c8c8;"
             " font-family: Consolas, 'Courier New'; font-size: 13px; }"
         )
 
         layout.addLayout(self._build_toolbar())
-        layout.addWidget(self._log_view, stretch=1)
+
+        # -- 左右分栏：设备面板 | 日志 --
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(self._device_panel)
+        splitter.addWidget(self._log_view)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 3)
+        splitter.setSizes([250, 850])
+
+        layout.addWidget(splitter, stretch=1)
 
         layout.addLayout(self._build_command_bar())
 
         self.setCentralWidget(central)
         self.statusBar().showMessage("未连接")
+
+    def _build_device_panel(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 4, 0)
+
+        self._device_label = QLabel("")
+        self._device_label.setStyleSheet(
+            "QLabel { font-weight: bold; font-size: 13px; color: #e0e0e0;"
+            " padding: 4px 0; }"
+        )
+        layout.addWidget(self._device_label)
+
+        self._channel_tree = QTreeWidget()
+        self._channel_tree.setHeaderLabels(["通道", "值"])
+        self._channel_tree.setRootIsDecorated(False)
+        self._channel_tree.setAlternatingRowColors(True)
+        self._channel_tree.setStyleSheet(
+            "QTreeWidget { background-color: #1e1f22; color: #c8c8c8;"
+            " font-family: Consolas, 'Courier New'; font-size: 12px;"
+            " alternate-background-color: #232428; }"
+            "QHeaderView::section { background-color: #2b2d30; color: #a0a0a0;"
+            " border: none; padding: 3px 6px; }"
+        )
+        header = self._channel_tree.header()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+
+        layout.addWidget(self._channel_tree)
+        return panel
 
     def _build_toolbar(self):
         bar = QHBoxLayout()
@@ -136,7 +191,7 @@ class MainWindow(QMainWindow):
 
         return bar
 
-    # ---------- 串口连接 ----------
+    # ====== 串口连接 ======
 
     def refresh_ports(self):
         current = self._port_combo.currentText()
@@ -151,6 +206,7 @@ class MainWindow(QMainWindow):
     def _toggle_connection(self):
         if self._manager.is_open():
             self._manager.close()
+            self._device_manager.reset()
             self._update_connection_state()
             self._append_system("串口已关闭")
             return
@@ -158,15 +214,14 @@ class MainWindow(QMainWindow):
         port = self._port_combo.currentText()
         baudrate = int(self._baud_combo.currentText())
         if not port:
-            QMessageBox.warning(
-                self, "提示", "没有可用的串口，请检查设备连接后点“刷新”。"
-            )
+            QMessageBox.warning(self, "提示", "没有可用的串口，请检查设备连接后点刷新。")
             return
         try:
             self._manager.open(port, baudrate)
         except Exception as exc:
             QMessageBox.critical(self, "打开失败", str(exc))
             return
+        self._device_manager.reset()
         self._update_connection_state()
         self._append_system("已连接 %s @ %d" % (port, baudrate))
 
@@ -183,11 +238,18 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage("未连接")
 
-    # ---------- 日志显示 ----------
+    # ====== 数据路由（Stage1 + Stage2）======
 
     def _on_data(self, line):
-        """收到 MCU 数据（后台线程 -> Qt 信号）。"""
+        """收到 MCU 行数据 → 先走协议解析，再走日志显示。"""
         for sub in line.splitlines():
+            if not sub:
+                continue
+            # 尝试 Stage 2 协议解析
+            kind, data = parse_protocol(sub)
+            if kind:
+                self._device_manager.process_message(kind, data)
+            # 日志显示（Stage 1 着色 + Stage 2 协议行以紫色显示）
             self._append_log(sub)
 
     def _append_log(self, line):
@@ -202,13 +264,47 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _fmt(text, color, tag=None):
+        if tag and tag == PROTOCOL_LEVEL:
+            # 协议行不重复显示 tag
+            return '<span style="color:%s">%s</span>' % (color, escape(text))
         prefix = "[%s] " % tag if tag else ""
         return '<span style="color:%s">%s%s</span>' % (color, prefix, escape(text))
 
-    def _on_error(self, message):
-        QMessageBox.warning(self, "串口错误", message)
+    # ====== 设备面板回调 ======
 
-    # ---------- 命令发送 ----------
+    def _on_device_updated(self, name, version):
+        self._device_panel.setVisible(True)
+        label = name
+        if version:
+            label += " v" + version
+        self._device_label.setText(label)
+
+    def _on_channel_added(self, channel):
+        label = "%s (%s)" % (channel.name, channel.unit) if channel.unit else channel.name
+        item = QTreeWidgetItem([label, "—"])
+        item.setData(0, Qt.ItemDataRole.UserRole, channel.id)
+        self._channel_tree.addTopLevelItem(item)
+
+    def _on_value_updated(self, ch_id, raw_val, parsed_val):
+        display = raw_val
+        # 显示带单位的值
+        if self._device_manager.device:
+            ch = self._device_manager.device.get_channel(ch_id)
+            if ch and ch.unit:
+                display = "%s %s" % (raw_val, ch.unit)
+        # 在树中查找并更新
+        for i in range(self._channel_tree.topLevelItemCount()):
+            item = self._channel_tree.topLevelItem(i)
+            if item.data(0, Qt.ItemDataRole.UserRole) == ch_id:
+                item.setText(1, display)
+                break
+
+    def _on_device_reset(self):
+        self._device_panel.setVisible(False)
+        self._device_label.setText("")
+        self._channel_tree.clear()
+
+    # ====== 命令发送 ======
 
     def _send_command(self):
         if not self._manager.is_open():
@@ -226,7 +322,8 @@ class MainWindow(QMainWindow):
         self._append_send(command)
         self._command_edit.clear()
 
-    # ---------- 窗口关闭 ----------
+    def _on_error(self, message):
+        QMessageBox.warning(self, "串口错误", message)
 
     def closeEvent(self, event):
         self._manager.close()
