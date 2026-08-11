@@ -68,6 +68,21 @@ def test_window_loopback():
     assert 1 in window._device_manager.device.channels
     assert window._channel_tree.topLevelItemCount() == 2
 
+    # --- MCU 周期重发注册信息（联调常见场景：每 2s 重发 $DEV/$CH） ---
+    # 设备通道不应丢失、树与仪表盘不应产生重复
+    window._manager.send("$DEV name=Quadcopter,ver=1.0\n")
+    window._manager.send("$CH id=0,name=Throttle,type=u16,unit=us\n")
+    window._manager.send("$CH id=1,name=Accel_X,type=i16,unit=raw\n")
+    app.processEvents()
+    time.sleep(0.1)
+    app.processEvents()
+
+    assert window._device_manager.device.name == "Quadcopter"
+    assert 0 in window._device_manager.device.channels, "重复宣告不应清空通道"
+    assert 1 in window._device_manager.device.channels
+    assert window._channel_tree.topLevelItemCount() == 2, "重复注册不应新增树行"
+    assert window._dashboard.count() == 2, "重复注册不应新增仪表盘组件"
+
     # 发送数据更新
     window._manager.send("$VAL id=0,val=1500\n")
     app.processEvents()

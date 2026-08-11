@@ -95,6 +95,7 @@ void UartTask(void *p_arg)
     int16_t mx, my, mz;
     uint32_t p_raw, t_raw;
     uint16_t throttle, roll, pitch, yaw;
+    uint32_t cycle = 0;
 
     (void)p_arg;
 
@@ -103,6 +104,15 @@ void UartTask(void *p_arg)
 
     while (1)
     {
+        /*
+         * 每 4 个周期（2s）重发一次注册信息。
+         * 原因：PC 端可能在上电后才打开串口，只注册一次会漏掉 $DEV/$CH；
+         * PC 端对重复注册是幂等的（按 id 去重），可放心周期重发。
+         */
+        if ((cycle++ & 3) == 0) {
+            Quadcopter_Register_Channels();
+        }
+
         OS_ENTER_CRITICAL();
         ax = Accel_X_RAW;  ay = Accel_Y_RAW;  az = Accel_Z_RAW;
         gx = Gyro_X_RAW;   gy = Gyro_Y_RAW;   gz = Gyro_Z_RAW;

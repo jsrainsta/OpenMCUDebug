@@ -55,6 +55,11 @@ class DeviceManager(QObject):
         version = data.get("ver", "") or data.get("version", "")
         if not name:
             return
+        # 同一设备重复宣告（MCU 周期重发注册信息）：保留已注册通道，仅更新版本
+        if self.device is not None and self.device.name == name:
+            self.device.version = version
+            self.device_updated.emit(name, version)
+            return
         self.device = Device(name=name, version=version)
         # 合并暂存通道
         for ch in self._pending_channels.values():

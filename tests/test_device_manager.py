@@ -84,6 +84,24 @@ def test_channel_visual():
     print("PASS: 通道可视化类型解析")
 
 
+def test_device_reenrollment():
+    """MCU 周期重发 $DEV 时，同名设备应保留已注册通道。"""
+    dm = DeviceManager()
+    dm.process_message("DEV", {"name": "FanController", "ver": "1.0"})
+    dm.process_message("CH", {"id": "0", "name": "Switch", "type": "u8", "unit": ""})
+    dm.process_message("CH", {"id": "1", "name": "ServoAngle", "type": "u8", "unit": "degree"})
+
+    # 2s 后设备重复宣告（版本更新），通道不应丢失
+    dm.process_message("DEV", {"name": "FanController", "ver": "1.1"})
+    assert dm.device.version == "1.1"
+    assert 0 in dm.device.channels and 1 in dm.device.channels, "重复宣告不应清空通道"
+
+    # 通道重发 → 仍是同一对象，不产生重复
+    dm.process_message("CH", {"id": "0", "name": "Switch", "type": "u8", "unit": ""})
+    assert len(dm.device.channels) == 2, "通道重发不应重复注册"
+    print("PASS: 设备重复宣告保留通道")
+
+
 def test_reset():
     dm = DeviceManager()
     dm.process_message("DEV", {"name": "Quadcopter"})
@@ -110,5 +128,6 @@ if __name__ == "__main__":
     test_value_update()
     test_value_float()
     test_channel_visual()
+    test_device_reenrollment()
     test_reset()
     test_invalid_messages()

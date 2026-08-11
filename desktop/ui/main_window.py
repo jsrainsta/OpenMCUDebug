@@ -288,6 +288,10 @@ class MainWindow(QMainWindow):
         self._device_label.setText(label)
 
     def _on_channel_added(self, channel):
+        # MCU 周期重发 $CH 时按 id 去重，避免通道树出现重复行
+        for i in range(self._channel_tree.topLevelItemCount()):
+            if self._channel_tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole) == channel.id:
+                return
         label = "%s (%s)" % (channel.name, channel.unit) if channel.unit else channel.name
         item = QTreeWidgetItem([label, "—"])
         item.setData(0, Qt.ItemDataRole.UserRole, channel.id)
