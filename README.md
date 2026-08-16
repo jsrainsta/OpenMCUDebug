@@ -39,6 +39,8 @@ A lightweight debugging assistant for embedded MCU development.
 
 ### PC 端
 
+**双击 `start.bat` 一键启动**（Windows）；或手动：
+
 ```bash
 pip install -r requirements.txt
 python -m desktop.main
