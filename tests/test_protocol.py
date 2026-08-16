@@ -105,6 +105,64 @@ def test_partial():
     print("PASS: 非 $ 前缀不透传")
 
 
+def test_param_register():
+    """Stage 5：$P 参数注册。"""
+    kind, data = parse_line(
+        "$P id=0,name=Roll_Kp,type=f32,min=0,max=10,val=1.5,group=Roll")
+    assert kind == "P", kind
+    assert data["id"] == "0"
+    assert data["name"] == "Roll_Kp"
+    assert data["type"] == "f32"
+    assert data["min"] == "0"
+    assert data["max"] == "10"
+    assert data["val"] == "1.5"
+    assert data["group"] == "Roll"
+    print("PASS: 参数注册 $P 解析")
+
+
+def test_param_register_minimal():
+    """$P 只带 id/name/type，min/max/val/group 可省。"""
+    kind, data = parse_line("$P id=1,name=Hover_Throttle,type=u16")
+    assert kind == "P"
+    assert data["name"] == "Hover_Throttle"
+    assert "min" not in data
+    assert "val" not in data
+    print("PASS: 参数注册最小字段")
+
+
+def test_param_value():
+    kind, data = parse_line("$PV id=0,val=2.0")
+    assert kind == "PV", kind
+    assert data["id"] == "0"
+    assert data["val"] == "2.0"
+    print("PASS: 参数值更新 $PV 解析")
+
+
+def test_param_ack_ok():
+    kind, data = parse_line("$PA id=0,ok=1")
+    assert kind == "PA", kind
+    assert data["id"] == "0"
+    assert data["ok"] == "1"
+    print("PASS: 参数回执 $PA ok")
+
+
+def test_param_ack_fail():
+    # 协议值不允许空格/逗号（与字符串通道一致），错误原因用单词/下划线
+    kind, data = parse_line("$PA id=0,ok=0,msg=out_of_range")
+    assert kind == "PA"
+    assert data["ok"] == "0"
+    assert data["msg"] == "out_of_range"
+    print("PASS: 参数回执 $PA 失败带原因")
+
+
+def test_param_prefix_not_confused():
+    """$P 不能误匹配 $PV/$PA；$VAL 也不能误匹配 $PV。"""
+    assert parse_line("$PV id=0,val=1")[0] == "PV"
+    assert parse_line("$PA id=0,ok=1")[0] == "PA"
+    assert parse_line("$VAL id=0,val=1")[0] == "VAL"
+    print("PASS: $P/$PV/$PA/$VAL 前缀互不误判")
+
+
 if __name__ == "__main__":
     test_dev()
     test_dev_no_version()
@@ -118,3 +176,9 @@ if __name__ == "__main__":
     test_plain_line()
     test_empty()
     test_partial()
+    test_param_register()
+    test_param_register_minimal()
+    test_param_value()
+    test_param_ack_ok()
+    test_param_ack_fail()
+    test_param_prefix_not_confused()

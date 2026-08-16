@@ -49,9 +49,7 @@ void Debug_Printf(const char *fmt, ...);
 #define DBG_VISUAL_GAUGE  "gauge"   /* 仪表盘：电压 / 电量 / 百分比 */
 #define DBG_VISUAL_CHART  "chart"   /* 实时曲线：温度 / 速度 / 姿态 */
 
-/* ======================== Stage 2：设备模型 ======================== */
-
-/**
+/* ======================== Stage 2：设备模型 ======================== *//**
  * @brief 宣告设备身份。
  * @param name    设备名称（如 "Quadcopter"）
  * @param version 固件版本（如 "1.0"，可为 NULL）
@@ -122,6 +120,64 @@ void Debug_Send_Val_Float(uint8_t id, float value);
  *   $VAL id=5,val=armed
  */
 void Debug_Send_Val_Str(uint8_t id, const char *value);
+
+/* ======================== Stage 5：参数调节 ======================== */
+
+/**
+ * @brief 注册一个可调参数。
+ * @param id    参数编号（0~255）
+ * @param name  参数名称（如 "Roll_Kp"）
+ * @param type  数据类型描述（"f32" / "u16" 等，仅用于 PC 端显示与输入提示）
+ * @param min   最小值；max 无限制时传 0 且 max=0（此时 min/max 字段省略）
+ * @param max   最大值
+ * @param val   当前值
+ * @param group 分组名（如 "Roll"，可为 NULL 归入 PC 端默认组）
+ *
+ * 使用示例:
+ *   Debug_Register_Param(0, "Roll_Kp", "f32", 0.0f, 10.0f, 1.5f, "Roll");
+ *
+ * 发送协议行:
+ *   $P id=0,name=Roll_Kp,type=f32,min=0,max=10,val=1.5,group=Roll
+ */
+void Debug_Register_Param(uint8_t id, const char *name, const char *type,
+                          float min, float max, float val, const char *group);
+
+/**
+ * @brief 上报参数当前值（$PV）。
+ * 适合 MCU 内部修改参数后主动告知 PC，或在周期上报任务中刷新数值。
+ *
+ * 发送协议行:
+ *   $PV id=0,val=1.8
+ */
+void Debug_Param_Update(uint8_t id, float val);
+
+/**
+ * @brief 发送参数下发回执（$PA）。
+ * @param id  参数编号
+ * @param ok  1=接受 0=拒绝
+ * @param msg 拒绝原因（单词，不能含逗号/空格，可为 NULL）
+ *
+ * 发送协议行:
+ *   $PA id=0,ok=1
+ *   $PA id=0,ok=0,msg=out_of_range
+ */
+void Debug_Param_Ack(uint8_t id, uint8_t ok, const char *msg);
+
+/**
+ * @brief 解析 PC 下发的参数设置行（$PS id=..,val=..）。
+ * @param line 收到的命令行（不含行尾）
+ * @param id   输出参数编号
+ * @param val  输出值
+ * @return 1=命中 $PS 并解析成功，0=不是 $PS 行
+ *
+ * 用法（用户命令处理函数中）:
+ *   uint8_t id; float val;
+ *   if (Debug_Param_Parse(line, &id, &val)) {
+ *       Apply_Param(id, val);
+ *       Debug_Param_Ack(id, 1, NULL);
+ *   }
+ */
+int Debug_Param_Parse(const char *line, uint8_t *id, float *val);
 
 /**
  * 底层串口发送函数。

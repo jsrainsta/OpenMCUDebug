@@ -18,3 +18,8 @@ dist/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 测试临时目录（沙箱/CI 下临时文件落在项目内）
+tests/.tmp/
+tests/.tmp_run/
+tests/probe*/

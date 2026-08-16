@@ -30,7 +30,9 @@ A lightweight debugging assistant for embedded MCU development.
 - **命令控制**：输入 `led on` 等文本命令直接下发，行尾可选（CRLF / LF / 无）
 - **设备识别**：设备自动宣告身份（名称 / 版本），通道注册后实时显示数值
 - **自动仪表盘**：设备只需在协议中描述显示方式（文本 / 仪表盘 / 实时曲线），PC 自动生成
-- **MCU 端 SDK**：`Debug_Init()` / `Debug_Print()` / `Debug_Printf()`，附 STM32 完整示例
+- **会话记录与回放**：一键把接收数据记录为 CSV，离线回放进日志 / 设备面板 / 仪表盘，支持暂停与变速
+- **参数调节面板**：设备注册 PID 等飞控参数后，PC 端分组编辑下发、回执反馈、本地预设保存/载入
+- **MCU 端 SDK**：`Debug_Init()` / `Debug_Print()` / `Debug_Printf()` / 通道注册 / 参数注册，附 STM32 与 Quadcopter 完整示例
 - **简单文本协议**：无需 JSON / 二进制协议，串口助手即可排查问题
 
 ## 🚀 快速开始
@@ -80,6 +82,22 @@ Debug_Send_Val_Float(3, 15.2f);
 
 5. 命令接收（单字节中断 + 行缓冲）参考 `mcu-sdk/examples/stm32_example/main.c`
 
+6. 注册飞控参数并处理 PC 下发（Stage 5，PC 端自动出现「参数」Tab）：
+
+```c
+Debug_Register_Param(0, "Roll_Kp", "f32", 0.0f, 10.0f, 1.5f, "Roll");
+Debug_Register_Param(1, "Hover_Throttle", "u16", 800.0f, 2000.0f, 1200.0f, "Throttle");
+
+// 命令接收处（收到一行 line 后）：
+uint8_t id; float val;
+if (Debug_Param_Parse(line, &id, &val)) {
+    Apply_Param(id, val);            // 你自己的应用逻辑
+    Debug_Param_Ack(id, 1, NULL);    // 回执，PC 端显示 ✓
+}
+```
+
+7. PC 端「● 开始记录」把会话存为 CSV，之后可「▶ 回放…」离线复现任意一次调试过程
+
 ## 📡 通信协议
 
 | 方向 | 格式 | 示例 |
@@ -88,6 +106,8 @@ Debug_Send_Val_Float(3, 15.2f);
 | MCU → PC | `$DEV` 设备宣告 | `$DEV name=Quadcopter,ver=1.0` |
 | MCU → PC | `$CH` 通道注册（可选 `visual`） | `$CH id=0,name=Throttle,type=u16,unit=us,visual=gauge` |
 | MCU → PC | `$VAL` 数据更新 | `$VAL id=0,val=1500` |
+| MCU → PC | `$P` 参数注册 / `$PV` 参数值 / `$PA` 下发回执 | `$P id=0,name=Roll_Kp,type=f32,min=0,max=10,val=1.5,group=Roll` |
+| PC → MCU | `$PS` 参数下发 | `$PS id=0,val=2.0` |
 | PC → MCU | 纯文本命令，一行一条 | `led on` / `motor 1000` / `pid kp 1.5` |
 
 详细说明见 [docs/protocol.md](docs/protocol.md)。
@@ -99,8 +119,10 @@ desktop/            PC 端软件（Python + PyQt6 + pyserial）
   ├── main.py           入口
   ├── serial/           串口通信模块
   ├── parser/           日志解析模块
-  ├── protocol/         设备协议解析（$DEV / $CH / $VAL）
+  ├── protocol/         设备协议解析（$DEV / $CH / $VAL / $P / $PV / $PA）
   ├── device/           设备模型与设备管理器
+  ├── param/            参数模型与参数调节面板（Stage 5）
+  ├── recorder/         会话记录（CSV）与离线回放（Stage 4）
   ├── visualization/    Dashboard 组件（文本 / 仪表盘 / 曲线）
   └── ui/               PyQt6 界面
 mcu-sdk/            MCU 端 SDK（C）
@@ -118,10 +140,12 @@ tests/              无硬件测试（pyserial loop:// 虚拟串口）
 ```bash
 python -m tests.test_serial_manager   # 串口收发
 python -m tests.test_parser           # 日志解析
-python -m tests.test_protocol         # 设备协议解析
+python -m tests.test_protocol         # 设备/参数协议解析
 python -m tests.test_device_manager   # 设备模型管理
+python -m tests.test_param_manager    # 参数模型管理
+python -m tests.test_recorder         # 会话记录与回放
 python -m tests.test_dashboard        # 仪表盘组件
-python -m tests.test_gui_smoke        # 界面冒烟（含仪表盘）
+python -m tests.test_gui_smoke        # 界面冒烟（仪表盘 + 记录回放 + 参数面板）
 ```
 
 ## 🗺️ 路线图
@@ -131,8 +155,8 @@ python -m tests.test_gui_smoke        # 界面冒烟（含仪表盘）
 | v0.1 ✅ | 串口通信、日志查看、命令控制（Stage 1 MVP） |
 | v0.2 ✅ | 标准化数据格式、设备模型（$DEV / $CH / $VAL） |
 | v0.3 ✅ | 自动仪表盘（文本 / 仪表盘 / 实时曲线） |
-| v0.4 | 数据保存与回放 |
-| v0.5 | 配置文件、参数调节 |
+| v0.4 ✅ | 数据保存与回放（CSV 记录 + 离线回放） |
+| v0.5 ✅ | 参数调节面板（$P / $PV / $PS / $PA + 预设） |
 | v1.0 | MCU SDK 完善、多设备支持、插件系统 |
 
 ## 📄 许可证

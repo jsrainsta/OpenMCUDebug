@@ -1,13 +1,18 @@
 """主窗口界面。
 
 Stage 3：串口连接 + 日志终端 + 命令发送 + 设备信息面板 + 通道数据面板 + 自动仪表盘。
+Stage 4：会话记录（CSV）与离线回放。
+Stage 5：参数调节面板（$P/$PV/$PA 协议 + 分组编辑 + 预设）。
 """
 
+import json
+import time
 from html import escape
 
 from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -25,8 +30,12 @@ from PyQt6.QtWidgets import (
 )
 
 from desktop.device.device_manager import DeviceManager
+from desktop.param.param_manager import ParamManager
+from desktop.param.param_panel import ParamPanel
 from desktop.parser.log_parser import color_for, parse_line
 from desktop.protocol.protocol import parse_line as parse_protocol
+from desktop.recorder.replay import ReplayPlayer
+from desktop.recorder.session_recorder import SessionRecorder
 from desktop.serial.serial_manager import SerialManager
 from desktop.visualization.dashboard import DashboardWidget
 
@@ -63,6 +72,10 @@ class MainWindow(QMainWindow):
         self._device_manager.value_updated.connect(self._on_value_updated)
         self._device_manager.device_reset.connect(self._on_device_reset)
 
+        # ---- Stage 5：参数模型 ----
+        self._param_manager = ParamManager()
+        self._param_manager.param_reset.connect(self._on_param_reset)
+
         # ---- 串口桥接 ----
         self._bridge = _SerialBridge()
         self._manager = SerialManager(
@@ -71,6 +84,12 @@ class MainWindow(QMainWindow):
         )
         self._bridge.data_received.connect(self._on_data)
         self._bridge.error.connect(self._on_error)
+
+        # ---- Stage 4：会话记录与回放 ----
+        self._recorder = SessionRecorder()
+        self._replay = ReplayPlayer()
+        self._replay.line_ready.connect(self._on_replay_line)
+        self._replay.finished.connect(self._on_replay_finished)
 
         self._build_ui()
         self.refresh_ports()
@@ -101,7 +120,18 @@ class MainWindow(QMainWindow):
         self._tab_widget.addTab(self._log_view, "日志终端")
         self._tab_widget.addTab(self._dashboard, "仪表盘")
 
+        # Stage 5：参数调节面板（第三个 Tab）
+        self._param_panel = ParamPanel()
+        self._param_panel.set_requested.connect(self._send_param_set)
+        self._param_panel.save_preset_requested.connect(self._save_preset)
+        self._param_panel.load_preset_requested.connect(self._load_preset)
+        self._param_manager.param_added.connect(self._param_panel.add_param)
+        self._param_manager.param_value_updated.connect(self._param_panel.update_value)
+        self._param_manager.param_acked.connect(self._param_panel.set_ack)
+        self._tab_widget.addTab(self._param_panel, "参数")
+
         layout.addLayout(self._build_toolbar())
+        layout.addLayout(self._build_record_bar())
 
         # -- 左右分栏：设备面板 | 日志/仪表盘 --
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -179,6 +209,51 @@ class MainWindow(QMainWindow):
 
         return bar
 
+    def _build_record_bar(self):
+        """Stage 4：会话记录 + 离线回放控件。"""
+        bar = QHBoxLayout()
+
+        self._record_btn = QPushButton("● 开始记录")
+        self._record_btn.clicked.connect(self._start_recording)
+        bar.addWidget(self._record_btn)
+
+        self._stop_record_btn = QPushButton("■ 停止记录")
+        self._stop_record_btn.setEnabled(False)
+        self._stop_record_btn.clicked.connect(self._stop_recording)
+        bar.addWidget(self._stop_record_btn)
+
+        bar.addSpacing(12)
+
+        self._replay_btn = QPushButton("▶ 回放…")
+        self._replay_btn.clicked.connect(self._choose_replay_file)
+        bar.addWidget(self._replay_btn)
+
+        self._pause_btn = QPushButton("暂停/继续")
+        self._pause_btn.setEnabled(False)
+        self._pause_btn.clicked.connect(self._toggle_replay_pause)
+        bar.addWidget(self._pause_btn)
+
+        bar.addWidget(QLabel("速度:"))
+        self._speed_combo = QComboBox()
+        self._speed_combo.addItems(["0.5x", "1x", "2x", "4x"])
+        self._speed_combo.setCurrentText("1x")
+        self._speed_combo.setEnabled(False)
+        self._speed_combo.currentTextChanged.connect(self._on_replay_speed)
+        bar.addWidget(self._speed_combo)
+
+        self._stop_replay_btn = QPushButton("■ 停止回放")
+        self._stop_replay_btn.setEnabled(False)
+        self._stop_replay_btn.clicked.connect(self._stop_replay)
+        bar.addWidget(self._stop_replay_btn)
+
+        bar.addStretch(1)
+
+        self._record_status = QLabel("")
+        self._record_status.setStyleSheet("QLabel { color: #a0a0a0; }")
+        bar.addWidget(self._record_status)
+
+        return bar
+
     def _build_command_bar(self):
         bar = QHBoxLayout()
 
@@ -215,6 +290,7 @@ class MainWindow(QMainWindow):
         if self._manager.is_open():
             self._manager.close()
             self._device_manager.reset()
+            self._param_manager.reset()
             self._update_connection_state()
             self._append_system("串口已关闭")
             return
@@ -230,6 +306,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "打开失败", str(exc))
             return
         self._device_manager.reset()
+        self._param_manager.reset()
         self._update_connection_state()
         self._append_system("已连接 %s @ %d" % (port, baudrate))
 
@@ -249,16 +326,91 @@ class MainWindow(QMainWindow):
     # ====== 数据路由（Stage1 + Stage2）======
 
     def _on_data(self, line):
-        """收到 MCU 行数据 → 先走协议解析，再走日志显示。"""
+        """收到 MCU 行数据 → 记录 → 协议解析 → 日志显示。"""
         for sub in line.splitlines():
             if not sub:
                 continue
-            # 尝试 Stage 2 协议解析
+            # Stage 4：记录原始行（含时间戳），供离线回放
+            if self._recorder.is_recording:
+                self._recorder.record(sub)
+            # 尝试 Stage 2/5 协议解析
             kind, data = parse_protocol(sub)
             if kind:
-                self._device_manager.process_message(kind, data)
-            # 日志显示（Stage 1 着色 + Stage 2 协议行以紫色显示）
+                if kind in ("DEV", "CH", "VAL"):
+                    self._device_manager.process_message(kind, data)
+                elif kind in ("P", "PV", "PA"):
+                    self._param_manager.process_message(kind, data)
+            # 日志显示（Stage 1 着色 + 协议行以紫色显示）
             self._append_log(sub)
+
+    # ====== Stage 4：会话记录 / 回放 ======
+
+    def _start_recording(self):
+        default_name = "session_%s.csv" % time.strftime("%Y%m%d_%H%M%S")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存会话记录", default_name, "CSV 文件 (*.csv)")
+        if not path:
+            return
+        self._recorder.start(path)
+        self._record_btn.setEnabled(False)
+        self._stop_record_btn.setEnabled(True)
+        self._record_status.setText("● 记录中: %s" % path)
+        self.statusBar().showMessage("开始记录: %s" % path)
+
+    def _stop_recording(self):
+        path = self._recorder.path
+        self._recorder.stop()
+        self._record_btn.setEnabled(True)
+        self._stop_record_btn.setEnabled(False)
+        self._record_status.setText("已保存: %s" % path)
+        self.statusBar().showMessage("记录已保存: %s" % path)
+
+    def _choose_replay_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择回放文件", "", "CSV 文件 (*.csv)")
+        if not path:
+            return
+        self._replay.load(path)
+        # 干净起点：清空设备/仪表盘/日志，避免与旧状态混合
+        self._device_manager.reset()
+        self._log_view.clear()
+        self._on_replay_speed(self._speed_combo.currentText())
+        self._set_replay_controls(True)
+        self._replay.play()
+        self.statusBar().showMessage("回放中: %s (%d 行)" % (path, self._replay.line_count))
+
+    def _on_replay_line(self, line):
+        """回放的一行数据 → 走与串口接收完全相同的数据链路。"""
+        self._on_data(line)
+
+    def _on_replay_finished(self):
+        self._set_replay_controls(False)
+        self.statusBar().showMessage("回放结束")
+
+    def _toggle_replay_pause(self):
+        if self._replay.is_playing:
+            self._replay.pause()
+            self._pause_btn.setText("继续")
+            self.statusBar().showMessage("回放已暂停")
+        else:
+            self._replay.play()
+            self._pause_btn.setText("暂停")
+            self.statusBar().showMessage("回放中")
+
+    def _stop_replay(self):
+        self._replay.stop()
+        self._set_replay_controls(False)
+        self.statusBar().showMessage("回放已停止")
+
+    def _on_replay_speed(self, text):
+        self._replay.set_speed(float(text.rstrip("x")))
+
+    def _set_replay_controls(self, playing):
+        self._replay_btn.setEnabled(not playing)
+        self._pause_btn.setEnabled(playing)
+        self._pause_btn.setText("暂停" if playing else "继续")
+        self._speed_combo.setEnabled(playing)
+        self._stop_replay_btn.setEnabled(playing)
 
     def _append_log(self, line):
         level, content = parse_line(line)
@@ -322,6 +474,79 @@ class MainWindow(QMainWindow):
         # Stage 3：清空仪表盘
         self._dashboard.reset()
 
+    # ====== Stage 5：参数 ======
+
+    def _on_param_reset(self):
+        self._param_panel.reset()
+
+    def _send_param_set(self, param_id, value_str):
+        """下发参数：$PS id=..,val=..（CRLF 结尾，协议行固定行尾）。"""
+        if not self._manager.is_open():
+            QMessageBox.warning(self, "提示", "请先打开串口。")
+            return
+        line = "$PS id=%d,val=%s" % (param_id, value_str.strip())
+        try:
+            self._manager.send(line + "\r\n")
+        except Exception as exc:
+            QMessageBox.critical(self, "发送失败", str(exc))
+            return
+        self._append_send(line)
+
+    def _save_preset(self, values):
+        """把当前全部参数值保存为 JSON 预设文件。"""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存参数预设", "pid_preset.json", "JSON 文件 (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(values, f, indent=2, ensure_ascii=False)
+        except OSError as exc:
+            QMessageBox.critical(self, "保存失败", str(exc))
+            return
+        self.statusBar().showMessage("预设已保存: %s" % path)
+
+    def _load_preset(self):
+        """载入 JSON 预设：按名称匹配参数，更新显示并（串口打开时）全部下发。"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "载入参数预设", "", "JSON 文件 (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                values = json.load(f)
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "载入失败", str(exc))
+            return
+        if not isinstance(values, dict):
+            QMessageBox.warning(self, "载入失败", "预设文件格式不正确。")
+            return
+
+        applied = self._param_panel.apply_preset(values)
+        if applied == 0:
+            QMessageBox.information(self, "提示", "预设中的参数在当前设备中不存在。")
+            return
+
+        # 串口打开时确认后全部下发
+        if self._manager.is_open():
+            reply = QMessageBox.question(
+                self, "下发预设",
+                "将下发 %d 个参数到设备，继续？" % applied,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                by_name = {p.name: p for p in self._param_manager.params.values()}
+                sent = 0
+                for name, value in values.items():
+                    param = by_name.get(name)
+                    if param is not None:
+                        self._send_param_set(param.id, str(value))
+                        sent += 1
+                self.statusBar().showMessage("已下发 %d 个参数" % sent)
+        else:
+            self.statusBar().showMessage(
+                "预设已载入 %d 个参数（未连接，未下发）" % applied)
+
     # ====== 命令发送 ======
 
     def _send_command(self):
@@ -345,4 +570,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._manager.close()
+        self._recorder.stop()
+        self._replay.stop()
         super().closeEvent(event)

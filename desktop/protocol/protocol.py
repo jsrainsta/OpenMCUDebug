@@ -1,7 +1,7 @@
-"""Stage 2/3 协议解析器。
+"""Stage 2/3/5 协议解析器。
 
-解析 MCU 发来的 $DEV / $CH / $VAL 协议行，返回结构化的消息，
-供 DeviceManager / DataManager 消费。
+解析 MCU 发来的 $DEV / $CH / $VAL / $P / $PV / $PA 协议行，
+返回结构化的消息，供 DeviceManager / ParamManager 消费。
 非协议行原样透传，由 log_parser 处理。
 
 协议格式（单行紧凑 key=value）::
@@ -9,8 +9,13 @@
     $DEV name=Quadcopter,ver=1.0
     $CH id=0,name=Throttle,type=u16,unit=us,visual=chart
     $VAL id=0,val=1000
+    $P   id=0,name=Roll_Kp,type=f32,min=0,max=10,val=1.5,group=Roll
+    $PV  id=0,val=1.8
+    $PA  id=0,ok=1
 
-Stage 3 起 $CH 可选携带 visual 字段（text/gauge/chart，默认 text），
+Stage 3 起 $CH 可选携带 visual 字段（text/gauge/chart，默认 text）；
+Stage 5（v0.5）新增参数协议 $P（注册）/ $PV（值更新）/ $PA（下发回执），
+PC 下发参数用 $PS id=..,val=..（PC 生成，无需解析）。
 解析器无需特殊处理——key=value 通配提取即可。其余字段向后兼容。
 """
 
@@ -21,6 +26,9 @@ import re
 _DEV_RE = re.compile(r"^\$DEV\b")
 _CH_RE  = re.compile(r"^\$CH\b")
 _VAL_RE = re.compile(r"^\$VAL\b")
+_P_RE   = re.compile(r"^\$P\b")    # \b 保证不误匹配 $PV / $PA
+_PV_RE  = re.compile(r"^\$PV\b")
+_PA_RE  = re.compile(r"^\$PA\b")
 
 # 提取 key=value（兼容逗号分隔和空格分隔，值可包含非分隔字符）
 _KV_RE = re.compile(r"(\w[\w.]*)=([^, \t]+)")
@@ -30,7 +38,7 @@ def parse_line(line):
     """解析一行协议数据。
 
     Returns:
-        (kind, data) — 其中 kind 为 "DEV" / "CH" / "VAL" / None。
+        (kind, data) — 其中 kind 为 "DEV" / "CH" / "VAL" / "P" / "PV" / "PA" / None。
         data 为解析出的键值对 dict，非协议行 data 为原始字符串（已去行尾）。
     """
     text = line.rstrip("\r\n")
@@ -43,6 +51,12 @@ def parse_line(line):
         return "CH", _parse_kv(text)
     if _VAL_RE.match(text):
         return "VAL", _parse_kv(text)
+    if _PV_RE.match(text):
+        return "PV", _parse_kv(text)
+    if _PA_RE.match(text):
+        return "PA", _parse_kv(text)
+    if _P_RE.match(text):
+        return "P", _parse_kv(text)
 
     return None, text
 

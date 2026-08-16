@@ -187,3 +187,106 @@ $VAL id=0,val=1500  → 实时刷新对应组件
 
 仪表盘位于主窗口"仪表盘"Tab，与"日志终端"Tab 并列；
 断开串口时自动清空，重连后按新的 `$CH` 重新生成。
+
+---
+
+## Stage 4：会话记录与回放（v0.4）
+
+协议零改动。PC 端把串口接收的每一行连同相对时间戳写入 CSV
+（首行表头 `time_ms,line`，line 字段按 CSV 规则转义）：
+
+```
+time_ms,line
+0.0,[INFO] System Start
+12.4,$DEV name=Quadcopter,ver=1.0
+512.3,$VAL id=0,val=1500
+```
+
+「回放」按录制时间差把行重新注入数据链路（日志着色、设备面板、
+仪表盘全部照常工作），支持暂停 / 变速（0.5x ~ 4x）。
+
+---
+
+## Stage 5：参数调节（v0.5）
+
+在 Stage 2 的 `$` 协议家族中增加参数类消息，实现 PC 端调节飞控参数
+（PID 等）的完整闭环：MCU 注册参数 → PC 展示与编辑 → 下发 → 回执。
+
+### 设计原则
+
+- **`$P` / `$PV` / `$PA` / `$PS` 与前缀不冲突**：`$P` 用 `\b` 边界匹配，
+  `$PV` / `$PA` 不会误判
+- **范围由 MCU 声明**：min/max 只在有意义时携带（SDK 约定 min==max 即省略），
+  PC 端据此显示范围提示；实际校验由 MCU 执行
+- **回执闭环**：PC 下发后必须收到 `$PA` 才知道参数是否被接受
+- **值与通道值同规则**：字符串形式传输，PC 自动转 int/float
+
+### 消息类型
+
+#### 1. PARAM_REGISTER — 参数注册
+
+```
+$P id=<编号>,name=<名称>,type=<类型>,min=<最小>,max=<最大>,val=<当前值>,group=<分组>
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | int | 是 | 参数编号（0~255） |
+| name | string | 是 | 参数名，如 `Roll_Kp` |
+| type | string | 是 | 数据类型描述（`f32` / `u16` 等），仅用于 PC 端显示与输入提示 |
+| min / max | float | 否 | 取值范围；无限制时省略（SDK 约定 min==max 即省略） |
+| val | float | 否 | 当前值 |
+| group | string | 否 | 分组名（如 `Roll` / `Pitch` / `Yaw`），PC 端按组分树 |
+
+示例：
+```
+$P id=0,name=Roll_Kp,type=f32,min=0,max=10,val=1.5,group=Roll
+$P id=9,name=Hover_Throttle,type=u16,val=1200
+```
+
+#### 2. PARAM_VALUE — 参数值更新
+
+```
+$PV id=<编号>,val=<数值>
+```
+
+MCU 内部修改参数后可主动上报，或随周期注册刷新当前值。
+
+#### 3. PARAM_SET — 参数下发（PC → MCU）
+
+```
+$PS id=<编号>,val=<数值>
+```
+
+PC 参数面板编辑后发送，行尾固定 `\r\n`。MCU 端用
+`Debug_Param_Parse()` 解析，应用后必须回执。
+
+#### 4. PARAM_ACK — 下发回执
+
+```
+$PA id=<编号>,ok=<0|1>
+$PA id=<编号>,ok=0,msg=<原因>
+```
+
+| 参数 | 说明 |
+|------|------|
+| ok | 1=接受，0=拒绝 |
+| msg | 拒绝原因（单词，不能含逗号/空格，如 `out_of_range` / `unknown`） |
+
+### 完整闭环示例
+
+```
+MCU → PC:  $P id=0,name=Roll_Kp,type=f32,min=0,max=10,val=1.5,group=Roll
+PC 面板:  显示分组 Roll 下 Roll_Kp，当前值 1.5，范围 0 ~ 10
+PC → MCU:  $PS id=0,val=2.0
+MCU:      应用成功 → $PA id=0,ok=1           （失败 → $PA id=0,ok=0,msg=out_of_range）
+```
+
+### PC 端处理
+
+- `$P` → 注册参数，按 `group` 分组显示在「参数」Tab（第三个 Tab）
+- `$PV` → 刷新参数当前值列
+- `$PA` → 状态列着色显示 ✓ 已应用 / ✗ 原因
+- 周期重发 `$P` 按 id 去重；断开串口时清空全部参数
+- 预设：当前全部参数值可保存为 JSON（`{参数名: 值}`），
+  载入后按名称匹配，串口打开时确认后全部下发

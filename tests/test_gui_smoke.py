@@ -125,7 +125,7 @@ def test_window_loopback():
     assert isinstance(window._dashboard._widgets[0], GaugeWidget)
     assert isinstance(window._dashboard._widgets[1], ChartWidget)
     assert isinstance(window._dashboard._widgets[2], TextWidget)
-    assert window._tab_widget.count() == 2, "应包含 日志终端 / 仪表盘 两个 Tab"
+    assert window._tab_widget.count() == 3, "应包含 日志终端 / 仪表盘 / 参数 三个 Tab"
 
     # 仪表盘随 $VAL 实时刷新
     window._manager.send("$VAL id=0,val=1500\n")
@@ -148,5 +148,112 @@ def test_window_loopback():
     print("PASS: Stage 1 + Stage 2 + Stage 3 GUI 冒烟测试通过")
 
 
+def test_record_replay_roundtrip():
+    """Stage 4：会话记录 → 离线回放 → 日志/设备面板/仪表盘全链路恢复。"""
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.show()
+
+    rec_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), ".tmp_run", "smoke_session.csv")
+    os.makedirs(os.path.dirname(rec_path), exist_ok=True)
+
+    # --- 记录：直接注入数据行（确定性更强，不依赖串口） ---
+    window._recorder.start(rec_path)
+    assert window._recorder.is_recording
+    window._on_data("$DEV name=Quadcopter,ver=1.0")
+    window._on_data("$CH id=0,name=Throttle,type=u16,unit=us,visual=gauge")
+    window._on_data("$VAL id=0,val=1500")
+    window._stop_recording()
+    assert not window._recorder.is_recording
+    assert os.path.exists(rec_path)
+    assert window._record_btn.isEnabled(), "停止记录后「开始记录」应恢复可用"
+
+    # --- 回放：载入 → 推进到末尾（不依赖真实定时器） ---
+    window._device_manager.reset()
+    window._log_view.clear()
+    window._replay.load(rec_path)
+    assert window._replay.line_count == 3
+    window._set_replay_controls(True)
+    window._replay.play()
+    window._replay.advance(10 ** 9)
+    app.processEvents()
+    time.sleep(0.1)
+    app.processEvents()
+
+    assert window._device_manager.device is not None
+    assert window._device_manager.device.name == "Quadcopter", "回放应重建设备"
+    assert 0 in window._device_manager.device.channels
+    assert window._dashboard.count() == 1, "回放应重建仪表盘组件"
+    assert window._dashboard._widgets[0]._value == 1500, "回放应恢复仪表盘数值"
+    assert "$DEV" in window._log_view.toPlainText(), "回放行应进入日志终端"
+
+    window._replay.stop()
+    window.close()
+    print("PASS: 会话记录 + 离线回放冒烟测试通过")
+
+
+def test_param_panel():
+    """Stage 5：参数协议全链路——注册 → 分组树 → 值更新 → 下发 → ACK → 预设。"""
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.show()
+
+    # 下发需要串口（loop:// 回环，命令会回显到日志）
+    window._manager.open("loop://", 115200)
+    window._update_connection_state()
+
+    # --- 参数注册 → 分组树 ---
+    window._manager.send("$P id=0,name=Roll_Kp,type=f32,min=0,max=10,val=1.5,group=Roll\n")
+    window._manager.send("$P id=1,name=Yaw_Kp,type=f32,min=0,max=10,val=1.0,group=Yaw\n")
+    app.processEvents()
+    time.sleep(0.1)
+    app.processEvents()
+
+    assert 0 in window._param_manager.params
+    assert window._param_manager.get(0).minimum == 0.0
+    assert window._param_panel._tree.topLevelItemCount() == 2, "应有两个分组"
+
+    # --- 周期重发 $P 不产生重复 ---
+    window._manager.send("$P id=0,name=Roll_Kp,type=f32,min=0,max=10,val=1.5,group=Roll\n")
+    app.processEvents()
+    time.sleep(0.05)
+    app.processEvents()
+    assert window._param_panel._tree.topLevelItemCount() == 2, "重复注册不应新增分组"
+
+    # --- $PV 值更新 ---
+    window._manager.send("$PV id=0,val=1.8\n")
+    app.processEvents()
+    time.sleep(0.1)
+    app.processEvents()
+    assert window._param_manager.get(0).value == 1.8
+
+    # --- 下发 $PS → 日志回显 ---
+    window._send_param_set(0, "2.0")
+    assert _wait_for_text(window, app, "$PS id=0,val=2.0"), "下发行应回显到日志"
+
+    # --- ACK → 状态列 ✓ ---
+    window._manager.send("$PA id=0,ok=1\n")
+    app.processEvents()
+    time.sleep(0.1)
+    app.processEvents()
+    assert "✓" in window._param_panel._items[0].text(3), "ACK 成功应显示 ✓"
+
+    # --- 预设：直接按名称应用（不经文件对话框） ---
+    applied = window._param_panel.apply_preset({"Roll_Kp": "9.9", "NotExist": "1"})
+    assert applied == 1, "应只匹配到存在的参数"
+    assert window._param_panel._items[0].text(1) == "9.9"
+
+    # --- reset 清空 ---
+    window._param_manager.reset()
+    assert window._param_panel._tree.topLevelItemCount() == 0
+
+    window._manager.close()
+    window.close()
+    print("PASS: 参数调节面板冒烟测试通过")
+
+
 if __name__ == "__main__":
     test_window_loopback()
+    test_record_replay_roundtrip()
+    test_param_panel()

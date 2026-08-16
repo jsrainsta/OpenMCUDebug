@@ -84,6 +84,71 @@ void Debug_Send_Val_Str(uint8_t id, const char *value)
     Debug_Printf("$VAL id=%u,val=%s", id, value);
 }
 
+/* ======================== Stage 5 实现 ======================== */
+
+void Debug_Register_Param(uint8_t id, const char *name, const char *type,
+                          float min, float max, float val, const char *group)
+{
+    if (name == NULL || type == NULL) {
+        return;
+    }
+    /* min == max（如 0/0）表示无限制，省略 min/max 字段 */
+    int has_range = (min < max);
+    if (group && group[0] != '\0') {
+        if (has_range) {
+            Debug_Printf("$P id=%u,name=%s,type=%s,min=%.6g,max=%.6g,val=%.6g,group=%s",
+                         id, name, type, (double)min, (double)max, (double)val, group);
+        } else {
+            Debug_Printf("$P id=%u,name=%s,type=%s,val=%.6g,group=%s",
+                         id, name, type, (double)val, group);
+        }
+    } else {
+        if (has_range) {
+            Debug_Printf("$P id=%u,name=%s,type=%s,min=%.6g,max=%.6g,val=%.6g",
+                         id, name, type, (double)min, (double)max, (double)val);
+        } else {
+            Debug_Printf("$P id=%u,name=%s,type=%s,val=%.6g",
+                         id, name, type, (double)val);
+        }
+    }
+}
+
+void Debug_Param_Update(uint8_t id, float val)
+{
+    Debug_Printf("$PV id=%u,val=%.6g", id, (double)val);
+}
+
+void Debug_Param_Ack(uint8_t id, uint8_t ok, const char *msg)
+{
+    if (msg && msg[0] != '\0') {
+        Debug_Printf("$PA id=%u,ok=%u,msg=%s", id, ok ? 1u : 0u, msg);
+    } else {
+        Debug_Printf("$PA id=%u,ok=%u", id, ok ? 1u : 0u);
+    }
+}
+
+int Debug_Param_Parse(const char *line, uint8_t *id, float *val)
+{
+    unsigned u;
+    float v;
+
+    if (line == NULL || id == NULL || val == NULL) {
+        return 0;
+    }
+    if (strncmp(line, "$PS ", 4) != 0) {
+        return 0;
+    }
+    if (sscanf(line, "$PS id=%u,val=%f", &u, &v) == 2) {
+        if (u > 255) {
+            return 0;
+        }
+        *id = (uint8_t)u;
+        *val = v;
+        return 1;
+    }
+    return 0;
+}
+
 void Debug_Print(const char *msg)
 {
     if (msg == NULL) {

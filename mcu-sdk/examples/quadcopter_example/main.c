@@ -1,6 +1,6 @@
 /**
  * @file main.c
- * @brief Quadcopter 集成 Stage 2 SDK 示例
+ * @brief Quadcopter 集成 Stage 2/3/5 SDK 示例
  *
  * 展示将原 UartTask 的自由格式 snprintf 替换为 Stage 2 协议的方法。
  * 本文件仅为参考示例，不修改原 Quadcopter 项目。
@@ -28,11 +28,16 @@
  *   - Temperature → 实时曲线
  *   - 其余通道  → 文本显示
  *
+ * Stage 5（参数调节）:
+ *   注册 PID 等飞控参数（$P），PC 端「参数」Tab 可分组编辑并下发;
+ *   PC 下发 $PS 行后由 Quadcopter_Handle_Command() 解析应用并回执 $PA。
+ *
  * 集成步骤:
  *   1. 把 mcu-sdk/include 与 mcu-sdk/src 加入 Quadcopter 工程编译
  *   2. 在工程中实现 Debug_UART_Send（即已有的 HAL_UART_Transmit）
  *   3. 替换 UartTask 为下面的实现
  *   4. PC 端打开串口后自动显示设备名、15 个通道，并自动生成仪表盘
+ *   5. 在工程原有的命令接收路径（收到一行后）调用 Quadcopter_Handle_Command
  */
 #include "mcu_debug.h"
 #include "main.h"    /* CubeMX 生成 */
@@ -80,6 +85,71 @@ static void Quadcopter_Register_Channels(void)
     Debug_Register_Channel(14, "Temperature", "u32", "raw", DBG_VISUAL_CHART);
 }
 
+/* ====================== Stage 5：飞控参数（PID 等） ====================== */
+
+/* 示例飞控参数（实际工程中替换为你的全局变量） */
+static float g_roll_kp = 1.5f, g_roll_ki = 0.02f, g_roll_kd = 0.1f;
+static float g_pitch_kp = 1.5f, g_pitch_ki = 0.02f, g_pitch_kd = 0.1f;
+static float g_yaw_kp = 2.0f, g_yaw_ki = 0.01f, g_yaw_kd = 0.0f;
+static uint16_t g_hover_throttle = 1200;   /* 悬停油门（us） */
+
+static void Quadcopter_Register_Params(void)
+{
+    /* min == max（0/0）时省略范围字段，表示无限制 */
+    Debug_Register_Param(0,  "Roll_Kp",  "f32", 0.0f, 10.0f,  g_roll_kp,  "Roll");
+    Debug_Register_Param(1,  "Roll_Ki",  "f32", 0.0f, 1.0f,   g_roll_ki,  "Roll");
+    Debug_Register_Param(2,  "Roll_Kd",  "f32", 0.0f, 1.0f,   g_roll_kd,  "Roll");
+    Debug_Register_Param(3,  "Pitch_Kp", "f32", 0.0f, 10.0f,  g_pitch_kp, "Pitch");
+    Debug_Register_Param(4,  "Pitch_Ki", "f32", 0.0f, 1.0f,   g_pitch_ki, "Pitch");
+    Debug_Register_Param(5,  "Pitch_Kd", "f32", 0.0f, 1.0f,   g_pitch_kd, "Pitch");
+    Debug_Register_Param(6,  "Yaw_Kp",   "f32", 0.0f, 10.0f,  g_yaw_kp,   "Yaw");
+    Debug_Register_Param(7,  "Yaw_Ki",   "f32", 0.0f, 1.0f,   g_yaw_ki,   "Yaw");
+    Debug_Register_Param(8,  "Yaw_Kd",   "f32", 0.0f, 1.0f,   g_yaw_kd,   "Yaw");
+    Debug_Register_Param(9,  "Hover_Throttle", "u16", 800.0f, 2000.0f,
+                         (float)g_hover_throttle, "Throttle");
+}
+
+/* 应用一个参数值到飞控（按 id 分发，范围校验后回执） */
+static void Quadcopter_Apply_Param(uint8_t id, float val)
+{
+    switch (id) {
+    case 0:  g_roll_kp = val;  break;
+    case 1:  g_roll_ki = val;  break;
+    case 2:  g_roll_kd = val;  break;
+    case 3:  g_pitch_kp = val; break;
+    case 4:  g_pitch_ki = val; break;
+    case 5:  g_pitch_kd = val; break;
+    case 6:  g_yaw_kp = val;   break;
+    case 7:  g_yaw_ki = val;   break;
+    case 8:  g_yaw_kd = val;   break;
+    case 9:
+        if (val < 800.0f || val > 2000.0f) {
+            Debug_Param_Ack(id, 0, "out_of_range");
+            return;
+        }
+        g_hover_throttle = (uint16_t)val;
+        break;
+    default:
+        Debug_Param_Ack(id, 0, "unknown");
+        return;
+    }
+    Debug_Param_Ack(id, 1, NULL);
+}
+
+/* 命令处理入口：在工程原有的命令行接收处（收到一行）调用。
+ * 支持 PC 端参数面板下发的 $PS 行，其余命令交给原处理逻辑。 */
+void Quadcopter_Handle_Command(const char *line)
+{
+    uint8_t id;
+    float val;
+
+    if (Debug_Param_Parse(line, &id, &val)) {
+        Quadcopter_Apply_Param(id, val);
+        return;
+    }
+    /* 原有文本命令（led on 等）继续走原处理 */
+}
+
 /* ====================== 数据上报任务（每 500ms） ====================== */
 
 #define UART_TASK_STK_SIZE  384
@@ -99,18 +169,20 @@ void UartTask(void *p_arg)
 
     (void)p_arg;
 
-    /* 上电后告知 PC 设备信息 + 注册全部通道 */
+    /* 上电后告知 PC 设备信息 + 注册全部通道 + 注册飞控参数 */
     Quadcopter_Register_Channels();
+    Quadcopter_Register_Params();
 
     while (1)
     {
         /*
          * 每 4 个周期（2s）重发一次注册信息。
-         * 原因：PC 端可能在上电后才打开串口，只注册一次会漏掉 $DEV/$CH；
+         * 原因：PC 端可能在上电后才打开串口，只注册一次会漏掉 $DEV/$CH/$P；
          * PC 端对重复注册是幂等的（按 id 去重），可放心周期重发。
          */
         if ((cycle++ & 3) == 0) {
             Quadcopter_Register_Channels();
+            Quadcopter_Register_Params();
         }
 
         OS_ENTER_CRITICAL();
