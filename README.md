@@ -33,6 +33,7 @@ A lightweight debugging assistant for embedded MCU development.
 - **会话记录与回放**：一键把接收数据记录为 CSV，离线回放进日志 / 设备面板 / 仪表盘，支持暂停与变速
 - **参数调节面板**：设备注册 PID 等飞控参数后，PC 端分组编辑下发、回执反馈、本地预设保存/载入
 - **物理量换算**：设备在协议中声明 `scale/offset/min/max`，PC 端直接显示 g、°/s、m 等物理量（如 `16384 → 1 g`），仪表盘量程按声明范围
+- **阈值告警**：按通道设置最大/最小值（物理量），越限时数值变红 + 状态栏提示，适合电池低压、油门饱和等监控
 - **MCU 端 SDK**：`Debug_Init()` / `Debug_Print()` / `Debug_Printf()` / 通道注册（含换算）/ 参数注册，附 STM32 与 Quadcopter 完整示例
 - **简单文本协议**：无需 JSON / 二进制协议，串口助手即可排查问题
 
@@ -162,6 +163,7 @@ python -m tests.test_gui_smoke        # 界面冒烟（仪表盘 + 记录回放 
 | v0.3 ✅ | 自动仪表盘（文本 / 仪表盘 / 实时曲线） |
 | v0.4 ✅ | 数据保存与回放（CSV 记录 + 离线回放） |
 | v0.5 ✅ | 参数调节面板（$P / $PV / $PS / $PA + 预设） |
+| v0.6 ✅ | 物理量换算（$CH scale/offset/min/max）+ 阈值告警 |
 | v1.0 | MCU SDK 完善、多设备支持、插件系统 |
 
 ## 📄 许可证

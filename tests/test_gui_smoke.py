@@ -289,8 +289,63 @@ def test_channel_scale_smoke():
     print("PASS: 通道物理量换算冒烟测试通过")
 
 
+def test_alarm_smoke():
+    """Stage 6：设置阈值 → 越限变红 + 状态栏提示 → 恢复。"""
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.show()
+
+    window._manager.open("loop://", 115200)
+    window._update_connection_state()
+
+    window._on_data("$DEV name=Quadcopter,ver=1.0")
+    window._on_data("$CH id=0,name=Throttle,type=u16,unit=us")
+    window._on_data("$VAL id=0,val=1500")
+    app.processEvents()
+    time.sleep(0.1)
+    app.processEvents()
+
+    def tree_item(ch_id):
+        for i in range(window._channel_tree.topLevelItemCount()):
+            item = window._channel_tree.topLevelItem(i)
+            if item.data(0, Qt.ItemDataRole.UserRole) == ch_id:
+                return item
+        return None
+
+    item = tree_item(0)
+    assert item is not None
+    assert item.foreground(1).color().name() == "#c8c8c8", "初始应为正常色"
+
+    # 设置阈值（绕过文件对话框，直接走 AlarmManager）
+    window._alarms.set_limit(0, 1100.0, 1900.0)
+
+    # 越限 → 变红 + 状态栏提示
+    window._on_data("$VAL id=0,val=2500")
+    app.processEvents()
+    time.sleep(0.1)
+    app.processEvents()
+    assert item.foreground(1).color().name() == "#e55d5d", "越限值应变红"
+    assert "告警" in window.statusBar().currentMessage(), "状态栏应有告警提示"
+
+    # 恢复 → 变回正常色
+    window._on_data("$VAL id=0,val=1500")
+    app.processEvents()
+    time.sleep(0.1)
+    app.processEvents()
+    assert item.foreground(1).color().name() == "#c8c8c8", "恢复后应回到正常色"
+
+    # 设备重置 → 告警清空
+    window._device_manager.reset()
+    assert window._alarms.get_limit(0) is None, "设备重置后应清空告警"
+
+    window._manager.close()
+    window.close()
+    print("PASS: 阈值告警冒烟测试通过")
+
+
 if __name__ == "__main__":
     test_window_loopback()
     test_record_replay_roundtrip()
     test_param_panel()
     test_channel_scale_smoke()
+    test_alarm_smoke()

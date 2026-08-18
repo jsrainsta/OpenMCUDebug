@@ -3,6 +3,7 @@
 Stage 3：串口连接 + 日志终端 + 命令发送 + 设备信息面板 + 通道数据面板 + 自动仪表盘。
 Stage 4：会话记录（CSV）与离线回放。
 Stage 5：参数调节面板（$P/$PV/$PA 协议 + 分组编辑 + 预设）。
+Stage 6：物理量换算（$CH scale/offset/min/max）+ 阈值告警。
 """
 
 import json
@@ -10,8 +11,11 @@ import time
 from html import escape
 
 from PyQt6.QtCore import Qt, QObject, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -22,6 +26,8 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -29,6 +35,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from desktop.alarm.alarm_manager import AlarmManager
 from desktop.device.device_manager import DeviceManager
 from desktop.param.param_manager import ParamManager
 from desktop.param.param_panel import ParamPanel
@@ -53,6 +60,9 @@ LINE_ENDINGS = {
 SYSTEM_COLOR = "#808080"
 SEND_COLOR = "#5ac8fa"
 PROTOCOL_LEVEL = "$PROTOCOL"
+# Stage 6：阈值告警用色
+ALARM_COLOR = QColor("#e55d5d")
+NORMAL_COLOR = QColor("#c8c8c8")
 
 
 class _SerialBridge(QObject):
@@ -76,6 +86,9 @@ class MainWindow(QMainWindow):
         # ---- Stage 5：参数模型 ----
         self._param_manager = ParamManager()
         self._param_manager.param_reset.connect(self._on_param_reset)
+
+        # ---- Stage 6：阈值告警（PC 端本地） ----
+        self._alarms = AlarmManager()
 
         # ---- 串口桥接 ----
         self._bridge = _SerialBridge()
@@ -203,6 +216,11 @@ class MainWindow(QMainWindow):
         bar.addWidget(self._connect_btn)
 
         bar.addStretch(1)
+
+        # Stage 6：阈值告警设置
+        alarm_btn = QPushButton("告警设置…")
+        alarm_btn.clicked.connect(self._open_alarm_settings)
+        bar.addWidget(alarm_btn)
 
         clear_btn = QPushButton("清空日志")
         clear_btn.clicked.connect(self._log_view.clear)
@@ -454,6 +472,7 @@ class MainWindow(QMainWindow):
 
     def _on_value_updated(self, ch_id, raw_val, parsed_val):
         display = raw_val
+        ch = None
         # Stage 6：显示换算后的物理量（value * scale + offset）+ 单位
         if self._device_manager.device:
             ch = self._device_manager.device.get_channel(ch_id)
@@ -466,6 +485,14 @@ class MainWindow(QMainWindow):
             item = self._channel_tree.topLevelItem(i)
             if item.data(0, Qt.ItemDataRole.UserRole) == ch_id:
                 item.setText(1, display)
+                # Stage 6：阈值告警（按换算后的物理量检查，越限变红）
+                if ch is not None:
+                    in_alarm, entered = self._alarms.check(
+                        ch_id, ch.scaled(parsed_val))
+                    item.setForeground(1, QBrush(ALARM_COLOR if in_alarm else NORMAL_COLOR))
+                    if entered:
+                        self.statusBar().showMessage(
+                            "告警: %s 越限（%s）" % (ch.name, display), 5000)
                 break
         # Stage 3：刷新仪表盘对应组件
         self._dashboard.update_value(ch_id, parsed_val)
@@ -476,6 +503,70 @@ class MainWindow(QMainWindow):
         self._channel_tree.clear()
         # Stage 3：清空仪表盘
         self._dashboard.reset()
+        # Stage 6：清空告警阈值与状态
+        self._alarms.clear()
+
+    # ====== Stage 6：阈值告警 ======
+
+    def _open_alarm_settings(self):
+        """阈值告警设置对话框：每通道一行，最小值/最大值可编辑（空=不限）。"""
+        if self._device_manager.device is None or not self._device_manager.device.channels:
+            QMessageBox.information(self, "提示", "请先连接设备并收到通道注册信息。")
+            return
+
+        channels = sorted(self._device_manager.device.channels.values(),
+                          key=lambda c: c.id)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("告警设置")
+        dialog.resize(460, 380)
+
+        table = QTableWidget(len(channels), 4)
+        table.setHorizontalHeaderLabels(["通道", "单位", "最小值", "最大值"])
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for row, ch in enumerate(channels):
+            limit = self._alarms.get_limit(ch.id)
+            lo = "" if limit is None or limit[0] is None else str(limit[0])
+            hi = "" if limit is None or limit[1] is None else str(limit[1])
+            table.setItem(row, 0, QTableWidgetItem(ch.name))
+            table.setItem(row, 1, QTableWidgetItem(ch.unit))
+            table.setItem(row, 2, QTableWidgetItem(lo))
+            table.setItem(row, 3, QTableWidgetItem(hi))
+        # 名称/单位列只读，阈值列可编辑
+        for r in range(table.rowCount()):
+            for col in (0, 1):
+                table.item(r, col).setFlags(
+                    table.item(r, col).flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                   | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(table)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._apply_alarm_settings(table, channels)
+
+    @staticmethod
+    def _parse_alarm_value(text):
+        """空串 → None（不限）；数字 → float；非法 → None。"""
+        text = (text or "").strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    def _apply_alarm_settings(self, table, channels):
+        for row, ch in enumerate(channels):
+            lo = self._parse_alarm_value(table.item(row, 2).text())
+            hi = self._parse_alarm_value(table.item(row, 3).text())
+            self._alarms.set_limit(ch.id, lo, hi)
+        self.statusBar().showMessage("告警设置已应用", 3000)
 
     # ====== Stage 5：参数 ======
 
