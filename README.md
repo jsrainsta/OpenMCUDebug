@@ -32,7 +32,8 @@ A lightweight debugging assistant for embedded MCU development.
 - **自动仪表盘**：设备只需在协议中描述显示方式（文本 / 仪表盘 / 实时曲线），PC 自动生成
 - **会话记录与回放**：一键把接收数据记录为 CSV，离线回放进日志 / 设备面板 / 仪表盘，支持暂停与变速
 - **参数调节面板**：设备注册 PID 等飞控参数后，PC 端分组编辑下发、回执反馈、本地预设保存/载入
-- **MCU 端 SDK**：`Debug_Init()` / `Debug_Print()` / `Debug_Printf()` / 通道注册 / 参数注册，附 STM32 与 Quadcopter 完整示例
+- **物理量换算**：设备在协议中声明 `scale/offset/min/max`，PC 端直接显示 g、°/s、m 等物理量（如 `16384 → 1 g`），仪表盘量程按声明范围
+- **MCU 端 SDK**：`Debug_Init()` / `Debug_Print()` / `Debug_Printf()` / 通道注册（含换算）/ 参数注册，附 STM32 与 Quadcopter 完整示例
 - **简单文本协议**：无需 JSON / 二进制协议，串口助手即可排查问题
 
 ## 🚀 快速开始
@@ -75,11 +76,13 @@ Debug_Error("Sensor Failed");
 Debug_Device_Init("Quadcopter", "1.0");
 Debug_Register_Channel(0, "Throttle", "u16", "us", DBG_VISUAL_GAUGE);
 Debug_Register_Channel(1, "Roll",     "u16", "us", DBG_VISUAL_CHART);
-Debug_Register_Channel(4, "Accel_X",  "i16", "raw", NULL);  // 文本显示
+// Stage 6：声明物理量换算（LSB → g），PC 端直接显示 1 g 而不是 16384
+Debug_Register_Channel_Ex(4, "Accel_X", "i16", "g", NULL,
+                          1.0f / 16384.0f, 0.0f, -2.0f, 2.0f);
 
-// 周期上报
+// 周期上报（仍上报原始值，换算由 PC 端完成）
 Debug_Send_Val(0, throttle);
-Debug_Send_Val_Float(3, 15.2f);
+Debug_Send_Val(4, ax);
 ```
 
 5. 命令接收（单字节中断 + 行缓冲）参考 `mcu-sdk/examples/stm32_example/main.c`
@@ -106,7 +109,7 @@ if (Debug_Param_Parse(line, &id, &val)) {
 |------|------|------|
 | MCU → PC | `[TAG] 内容`（UTF-8，一行一条） | `[INFO] System Start` / `[DATA] Counter=10` |
 | MCU → PC | `$DEV` 设备宣告 | `$DEV name=Quadcopter,ver=1.0` |
-| MCU → PC | `$CH` 通道注册（可选 `visual`） | `$CH id=0,name=Throttle,type=u16,unit=us,visual=gauge` |
+| MCU → PC | `$CH` 通道注册（可选 `visual` / `scale` / `offset` / `min` / `max`） | `$CH id=4,name=Accel_X,type=i16,unit=g,scale=6.10352e-05,offset=0,min=-2,max=2` |
 | MCU → PC | `$VAL` 数据更新 | `$VAL id=0,val=1500` |
 | MCU → PC | `$P` 参数注册 / `$PV` 参数值 / `$PA` 下发回执 | `$P id=0,name=Roll_Kp,type=f32,min=0,max=10,val=1.5,group=Roll` |
 | PC → MCU | `$PS` 参数下发 | `$PS id=0,val=2.0` |

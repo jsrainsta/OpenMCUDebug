@@ -102,6 +102,35 @@ def test_device_reenrollment():
     print("PASS: 设备重复宣告保留通道")
 
 
+def test_channel_scale():
+    """Stage 6：$CH 携带 scale/offset/min/max 换算字段。"""
+    dm = DeviceManager()
+    dm.process_message("DEV", {"name": "Quadcopter"})
+    dm.process_message("CH", {"id": "4", "name": "Accel_X", "type": "i16", "unit": "g",
+                              "scale": "0.000061035", "offset": "0",
+                              "min": "-2", "max": "2"})
+    dm.process_message("CH", {"id": "0", "name": "Throttle", "type": "u16",
+                              "unit": "us"})  # 无换算字段
+    accel = dm.device.get_channel(4)
+    assert accel.scale == 0.000061035
+    assert accel.offset == 0.0
+    assert accel.minimum == -2.0
+    assert accel.maximum == 2.0
+    # 换算：16384 LSB → ≈1 g（协议 scale 是十进制近似值，容差放宽）
+    assert abs(accel.scaled(16384) - 1.0) < 1e-4
+    assert abs(accel.scaled(-16384) - (-1.0)) < 1e-4
+    # 非法 scale 回退默认
+    throttle = dm.device.get_channel(0)
+    assert throttle.scale == 1.0
+    assert throttle.offset == 0.0
+    assert throttle.minimum is None
+    dm.process_message("CH", {"id": "5", "name": "Bad", "type": "i16", "scale": "x"})
+    assert dm.device.get_channel(5).scale == 1.0, "非法 scale 应回退 1.0"
+    # 字符串值不换算
+    assert dm.device.get_channel(4).scaled("armed") == "armed"
+    print("PASS: 通道物理量换算字段解析")
+
+
 def test_reset():
     dm = DeviceManager()
     dm.process_message("DEV", {"name": "Quadcopter"})
@@ -128,6 +157,7 @@ if __name__ == "__main__":
     test_value_update()
     test_value_float()
     test_channel_visual()
+    test_channel_scale()
     test_device_reenrollment()
     test_reset()
     test_invalid_messages()

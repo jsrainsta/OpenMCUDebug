@@ -38,7 +38,7 @@ class ChartWidget(BaseWidget):
         if isinstance(value, str):
             return  # 字符串无法画曲线
         try:
-            v = float(value)
+            v = float(self.channel.scaled(value))
         except (TypeError, ValueError):
             return
         self._points.append((self._count, v))

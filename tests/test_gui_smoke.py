@@ -253,7 +253,44 @@ def test_param_panel():
     print("PASS: 参数调节面板冒烟测试通过")
 
 
+def test_channel_scale_smoke():
+    """Stage 6：$CH 带换算字段 → 通道树显示换算后的物理量。"""
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.show()
+
+    window._manager.open("loop://", 115200)
+    window._update_connection_state()
+
+    window._on_data("$DEV name=Quadcopter,ver=1.0")
+    window._on_data(
+        "$CH id=4,name=Accel_X,type=i16,unit=g,scale=6.10352e-05,offset=0,min=-2,max=2")
+    window._on_data("$VAL id=4,val=16384")
+    app.processEvents()
+    time.sleep(0.1)
+    app.processEvents()
+
+    # 通道树应显示换算后的 "1 g"（而非 16384 raw）
+    found = False
+    for i in range(window._channel_tree.topLevelItemCount()):
+        item = window._channel_tree.topLevelItem(i)
+        if item.data(0, Qt.ItemDataRole.UserRole) == 4:
+            assert item.text(1) == "1 g", "换算后应显示 1 g，实际 %s" % item.text(1)
+            found = True
+            break
+    assert found, "通道树中应有 Accel_X"
+
+    # 设备模型中的通道持有换算元信息
+    ch = window._device_manager.device.get_channel(4)
+    assert ch.minimum == -2.0 and ch.maximum == 2.0
+
+    window._manager.close()
+    window.close()
+    print("PASS: 通道物理量换算冒烟测试通过")
+
+
 if __name__ == "__main__":
     test_window_loopback()
     test_record_replay_roundtrip()
     test_param_panel()
+    test_channel_scale_smoke()

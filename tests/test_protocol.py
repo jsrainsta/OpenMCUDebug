@@ -53,6 +53,20 @@ def test_ch_with_visual():
     print("PASS: CHANNEL_REGISTER 带可视化类型")
 
 
+def test_ch_with_scale():
+    """Stage 6：$CH 携带 scale/offset/min/max 换算字段。"""
+    kind, data = parse_line(
+        "$CH id=4,name=Accel_X,type=i16,unit=g,scale=6.10352e-05,offset=0,min=-2,max=2")
+    assert kind == "CH"
+    assert data["scale"] == "6.10352e-05"
+    assert data["offset"] == "0"
+    assert data["min"] == "-2"
+    assert data["max"] == "2"
+    kind, data = parse_line("$CH id=0,name=Throttle,type=u16,unit=us")
+    assert "scale" not in data, "无换算字段时不应出现 scale"
+    print("PASS: CHANNEL_REGISTER 带物理量换算字段")
+
+
 def test_val():
     kind, data = parse_line("$VAL id=0,val=1000")
     assert kind == "VAL", kind
@@ -169,6 +183,7 @@ if __name__ == "__main__":
     test_ch()
     test_ch_no_unit()
     test_ch_with_visual()
+    test_ch_with_scale()
     test_val()
     test_val_negative()
     test_val_float()

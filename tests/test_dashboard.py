@@ -101,8 +101,48 @@ def test_dashboard_duplicate_channel():
     print("PASS: 重复通道注册忽略")
 
 
+def test_dashboard_scale_display():
+    """Stage 6：组件按 scale/offset 换算后显示，gauge 优先使用声明量程。"""
+    dash = DashboardWidget()
+
+    # 带换算的文本通道：16384 LSB → 1 g
+    dash.add_channel(Channel(4, "Accel_X", "i16", "g", visual="text",
+                             scale=1.0 / 16384.0, offset=0.0,
+                             minimum=-2.0, maximum=2.0))
+    dash.update_value(4, 16384)
+    _app.processEvents()
+    assert dash._widgets[4]._value_label.text() == "1 g", \
+        "换算后应显示 1 g，实际 %s" % dash._widgets[4]._value_label.text()
+
+    # 带换算 + 声明量程的仪表
+    dash.add_channel(Channel(5, "Voltage", "f32", "V", visual="gauge",
+                             scale=0.001, offset=0.0,
+                             minimum=0.0, maximum=5.0))
+    g = dash._widgets[5]
+    assert g._lo == 0.0 and g._hi == 5.0, "gauge 应使用声明量程"
+    dash.update_value(5, 3300)   # 3300 mV → 3.3 V
+    _app.processEvents()
+    assert abs(g._value - 3.3) < 1e-9
+    assert g._lo == 0.0 and g._hi == 5.0, "声明量程后不应再自适应扩展"
+
+    # 无声明量程的仪表仍自适应
+    dash.add_channel(Channel(6, "Raw", "i16", "raw", visual="gauge"))
+    dash.update_value(6, 120)
+    assert dash._widgets[6]._hi >= 120, "无声明量程应自适应扩展"
+
+    # 曲线按换算值采样
+    dash.add_channel(Channel(7, "Gyro_Z", "i16", "deg/s", visual="chart",
+                             scale=1.0 / 131.0, offset=0.0))
+    dash.update_value(7, 131)
+    _app.processEvents()
+    assert len(dash._widgets[7]._points) == 1
+    assert abs(dash._widgets[7]._points[0][1] - 1.0) < 1e-9, "曲线点应为换算值"
+    print("PASS: 组件按物理量换算显示（文本/仪表/曲线 + 声明量程）")
+
+
 if __name__ == "__main__":
     test_create_widget_factory()
     test_dashboard_lifecycle()
     test_grid_no_overlap()
     test_dashboard_duplicate_channel()
+    test_dashboard_scale_display()

@@ -42,27 +42,44 @@ void Debug_Register_Channel(uint8_t id, const char *name,
                             const char *type, const char *unit,
                             const char *visual)
 {
+    Debug_Register_Channel_Ex(id, name, type, unit, visual,
+                              1.0f, 0.0f, 0.0f, 0.0f);
+}
+
+void Debug_Register_Channel_Ex(uint8_t id, const char *name,
+                               const char *type, const char *unit,
+                               const char *visual,
+                               float scale, float offset,
+                               float min, float max)
+{
+    char line[DEBUG_BUFFER_SIZE];
+    int len = 0;
+    int has_visual = (visual != NULL) && (visual[0] != '\0')
+                     && (strcmp(visual, DBG_VISUAL_TEXT) != 0);
+    int has_scale = (scale != 1.0f) || (offset != 0.0f);
+    int has_range = (min < max);
+
     if (name == NULL || type == NULL) {
         return;
     }
-    /* visual 为 NULL / 空 / text 时省略该字段，保持与旧协议完全兼容 */
-    int has_visual = (visual != NULL) && (visual[0] != '\0')
-                     && (strcmp(visual, DBG_VISUAL_TEXT) != 0);
 
+    len += snprintf(line + len, sizeof(line) - len,
+                    "$CH id=%u,name=%s,type=%s", id, name, type);
     if (unit && unit[0] != '\0') {
-        if (has_visual) {
-            Debug_Printf("$CH id=%u,name=%s,type=%s,unit=%s,visual=%s",
-                         id, name, type, unit, visual);
-        } else {
-            Debug_Printf("$CH id=%u,name=%s,type=%s,unit=%s",
-                         id, name, type, unit);
-        }
-    } else if (has_visual) {
-        Debug_Printf("$CH id=%u,name=%s,type=%s,visual=%s",
-                     id, name, type, visual);
-    } else {
-        Debug_Printf("$CH id=%u,name=%s,type=%s", id, name, type);
+        len += snprintf(line + len, sizeof(line) - len, ",unit=%s", unit);
     }
+    if (has_visual) {
+        len += snprintf(line + len, sizeof(line) - len, ",visual=%s", visual);
+    }
+    if (has_scale) {
+        len += snprintf(line + len, sizeof(line) - len, ",scale=%.6g,offset=%.6g",
+                        (double)scale, (double)offset);
+    }
+    if (has_range) {
+        len += snprintf(line + len, sizeof(line) - len, ",min=%.6g,max=%.6g",
+                        (double)min, (double)max);
+    }
+    Debug_Print(line);
 }
 
 void Debug_Send_Val(uint8_t id, int32_t value)

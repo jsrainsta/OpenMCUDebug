@@ -65,22 +65,30 @@ static void Quadcopter_Register_Channels(void)
     Debug_Register_Channel(2, "Pitch",    "u16", "us", DBG_VISUAL_CHART);
     Debug_Register_Channel(3, "Yaw",      "u16", "us", DBG_VISUAL_CHART);
 
-    /* 加速度计（原始值，LSB） */
-    Debug_Register_Channel(4, "Accel_X", "i16", "raw", NULL);
-    Debug_Register_Channel(5, "Accel_Y", "i16", "raw", NULL);
-    Debug_Register_Channel(6, "Accel_Z", "i16", "raw", NULL);
+    /* 加速度计：MPU6050 ±2g 满量程，16384 LSB/g → 显示为 g */
+    Debug_Register_Channel_Ex(4, "Accel_X", "i16", "g", NULL,
+                              1.0f / 16384.0f, 0.0f, -2.0f, 2.0f);
+    Debug_Register_Channel_Ex(5, "Accel_Y", "i16", "g", NULL,
+                              1.0f / 16384.0f, 0.0f, -2.0f, 2.0f);
+    Debug_Register_Channel_Ex(6, "Accel_Z", "i16", "g", NULL,
+                              1.0f / 16384.0f, 0.0f, -2.0f, 2.0f);
 
-    /* 陀螺仪（原始值，LSB） */
-    Debug_Register_Channel(7, "Gyro_X", "i16", "raw", NULL);
-    Debug_Register_Channel(8, "Gyro_Y", "i16", "raw", NULL);
-    Debug_Register_Channel(9, "Gyro_Z", "i16", "raw", NULL);
+    /* 陀螺仪：±250°/s，131 LSB/(°/s) → 显示为 deg/s */
+    Debug_Register_Channel_Ex(7, "Gyro_X", "i16", "deg/s", NULL,
+                              1.0f / 131.0f, 0.0f, -250.0f, 250.0f);
+    Debug_Register_Channel_Ex(8, "Gyro_Y", "i16", "deg/s", NULL,
+                              1.0f / 131.0f, 0.0f, -250.0f, 250.0f);
+    Debug_Register_Channel_Ex(9, "Gyro_Z", "i16", "deg/s", NULL,
+                              1.0f / 131.0f, 0.0f, -250.0f, 250.0f);
 
     /* 磁力计（原始值） */
     Debug_Register_Channel(10, "Mag_X", "i16", "raw", NULL);
     Debug_Register_Channel(11, "Mag_Y", "i16", "raw", NULL);
     Debug_Register_Channel(12, "Mag_Z", "i16", "raw", NULL);
 
-    /* 气压计文本显示 + 温度实时曲线 */
+    /* 气压计文本显示 + 温度实时曲线
+     * 注：MS5611 的原始值→物理量换算非纯线性，示例中保持 raw，
+     * 如固件已算出气压/温度可直接用 Debug_Send_Val_Float 上报。 */
     Debug_Register_Channel(13, "Pressure",    "u32", "raw", NULL);
     Debug_Register_Channel(14, "Temperature", "u32", "raw", DBG_VISUAL_CHART);
 }

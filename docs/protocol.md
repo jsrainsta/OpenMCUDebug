@@ -173,6 +173,27 @@ $CH id=2,name=Status,type=str,visual=text
 - 未知类型按 `text` 处理（容错）
 - 仪表/曲线忽略字符串值（如 `$VAL id=0,val=armed`）
 
+#### 4. CHANNEL_REGISTER 增加物理量换算字段（Stage 6 / v0.6）
+
+```
+$CH id=<编号>,name=<名称>,type=<类型>,unit=<单位>,visual=<类型>,scale=<系数>,offset=<偏移>,min=<下限>,max=<上限>
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| scale | float | 否 | 换算系数，物理量 = 原始值 × scale + offset；缺省 1 |
+| offset | float | 否 | 换算偏移；缺省 0 |
+| min / max | float | 否 | 量程上下限（仪表盘优先使用，不再自适应）；缺省无 |
+
+scale / offset / min / max 均为可选，全部缺省时输出与旧版逐字节一致。
+典型用法（MPU6050 ±2g，16384 LSB/g）：
+
+```
+$CH id=4,name=Accel_X,type=i16,unit=g,scale=6.10352e-05,offset=0,min=-2,max=2
+```
+
+PC 端文本 / 仪表 / 曲线组件统一按换算值显示（如 `16384` → `1 g`）。
+
 ### PC 端自动生成流程
 
 ```

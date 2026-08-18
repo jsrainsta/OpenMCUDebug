@@ -78,12 +78,17 @@ class DeviceManager(QObject):
         visual = data.get("visual", "text")
         if visual not in ("text", "gauge", "chart"):
             visual = "text"
+        # Stage 6：物理量换算（可选字段，缺省不换算）
         ch = Channel(
             id=ch_id,
             name=data.get("name", "?"),
             type=data.get("type", "i32"),
             unit=data.get("unit", ""),
             visual=visual,
+            scale=self._opt_float(data.get("scale"), 1.0),
+            offset=self._opt_float(data.get("offset"), 0.0),
+            minimum=self._opt_float(data.get("min")),
+            maximum=self._opt_float(data.get("max")),
         )
         if self.device:
             self.device.add_channel(ch)
@@ -117,3 +122,13 @@ class DeviceManager(QObject):
             return int(raw)
         except (ValueError, TypeError):
             return raw
+
+    @staticmethod
+    def _opt_float(raw, default=None):
+        """把字符串转 float；缺失 / 非法返回 default。"""
+        if raw in (None, ""):
+            return default
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            return default

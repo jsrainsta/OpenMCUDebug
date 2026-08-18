@@ -37,6 +37,7 @@ from desktop.protocol.protocol import parse_line as parse_protocol
 from desktop.recorder.replay import ReplayPlayer
 from desktop.recorder.session_recorder import SessionRecorder
 from desktop.serial.serial_manager import SerialManager
+from desktop.visualization.base import fmt_value
 from desktop.visualization.dashboard import DashboardWidget
 
 # 常用波特率
@@ -453,11 +454,13 @@ class MainWindow(QMainWindow):
 
     def _on_value_updated(self, ch_id, raw_val, parsed_val):
         display = raw_val
-        # 显示带单位的值
+        # Stage 6：显示换算后的物理量（value * scale + offset）+ 单位
         if self._device_manager.device:
             ch = self._device_manager.device.get_channel(ch_id)
-            if ch and ch.unit:
-                display = "%s %s" % (raw_val, ch.unit)
+            if ch:
+                display = fmt_value(ch.scaled(parsed_val))
+                if ch.unit:
+                    display += " " + ch.unit
         # 在树中查找并更新
         for i in range(self._channel_tree.topLevelItemCount()):
             item = self._channel_tree.topLevelItem(i)

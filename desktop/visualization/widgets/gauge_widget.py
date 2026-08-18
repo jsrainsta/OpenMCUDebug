@@ -26,8 +26,15 @@ PEN_WIDTH = 8              # 弧线宽度
 class GaugeWidget(BaseWidget):
     def __init__(self, channel):
         super().__init__(channel)
-        self._lo = 0.0            # 量程下限（自适应扩展）
-        self._hi = 100.0          # 量程上限
+        # Stage 6：通道声明了量程则优先使用，否则 0~100 自适应扩展
+        if channel.minimum is not None and channel.maximum is not None:
+            self._lo = float(channel.minimum)
+            self._hi = float(channel.maximum)
+            self._fixed_range = True
+        else:
+            self._lo = 0.0
+            self._hi = 100.0
+            self._fixed_range = False
         self._value = None
         self.setMinimumHeight(150)
 
@@ -35,14 +42,16 @@ class GaugeWidget(BaseWidget):
         if isinstance(value, str):
             return  # 字符串无法画仪表
         try:
-            v = float(value)
+            v = float(self.channel.scaled(value))
         except (TypeError, ValueError):
             return
         self._value = v
-        if v < self._lo:
-            self._lo = v
-        if v > self._hi:
-            self._hi = v
+        # 未声明量程时随数据自适应扩展
+        if not self._fixed_range:
+            if v < self._lo:
+                self._lo = v
+            if v > self._hi:
+                self._hi = v
         self.update()
 
     # ====== 绘制 ======

@@ -83,6 +83,37 @@ void Debug_Register_Channel(uint8_t id, const char *name,
                             const char *visual);
 
 /**
+ * @brief 注册一个带物理量换算的数据通道（Stage 6）。
+ *
+ * 除 Debug_Register_Channel 的参数外，额外描述原始值到物理量的换算:
+ *
+ *   物理量 = 原始值 × scale + offset
+ *
+ * @param id     通道编号（0~255）
+ * @param name   通道名称
+ * @param type   数据类型
+ * @param unit   单位（如 "g"、"deg/s"、"m"、可为 NULL）
+ * @param visual 可视化类型（可为 NULL）
+ * @param scale  换算系数（如 MPU6050 加速度 1/16384 ≈ 0.000061，即 LSB → g）
+ * @param offset 换算偏移（一般 0）
+ * @param min    量程下限（仪表盘优先使用；与 max 相等时省略）
+ * @param max    量程上限（如 ±2g → -2, 2）
+ *
+ * 使用示例:
+ *   Debug_Register_Channel_Ex(4, "Accel_X", "i16", "g", NULL,
+ *                             1.0f / 16384.0f, 0.0f, -2.0f, 2.0f);
+ *
+ * 发送协议行（scale=1 且 offset=0 且 min==max 时省略全部换算字段，
+ * 输出与 Debug_Register_Channel 逐字节一致）:
+ *   $CH id=4,name=Accel_X,type=i16,unit=g,scale=6.10352e-05,offset=0,min=-2,max=2
+ */
+void Debug_Register_Channel_Ex(uint8_t id, const char *name,
+                               const char *type, const char *unit,
+                               const char *visual,
+                               float scale, float offset,
+                               float min, float max);
+
+/**
  * @brief 发送一个整数通道值。
  * @param id    通道编号（0~255）
  * @param value 整数值（int32，传感器原始数据可直接传入）

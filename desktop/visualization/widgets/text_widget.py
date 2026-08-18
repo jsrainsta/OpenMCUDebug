@@ -27,7 +27,8 @@ class TextWidget(BaseWidget):
     def update_value(self, value):
         if value is None:
             return
-        text = fmt_value(value)
+        # Stage 6：先换算为物理量再显示
+        text = fmt_value(self.channel.scaled(value))
         if self.channel.unit:
             text += " " + self.channel.unit
         self._value_label.setText(text)
